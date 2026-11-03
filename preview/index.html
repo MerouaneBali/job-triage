@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Job triage</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>Job triage</h1>
+        <div class="meta" id="meta">Loading dumps…</div>
+      </div>
+      <div class="meta" id="selection-meta"></div>
+    </header>
+
+    <div class="toolbar">
+      <label class="dump-pick">
+        Dump
+        <select id="dumpSelect"></select>
+      </label>
+      <button type="button" class="ghost" id="refreshDumps" title="Reload dump list">
+        Refresh
+      </button>
+      <input type="search" id="q" placeholder="Filter title or company" />
+      <label><input type="checkbox" id="easyOnly" /> Easy Apply only</label>
+      <label><input type="checkbox" id="salaryOnly" /> Has salary</label>
+      <button type="button" id="openSelected" disabled>Open selected</button>
+      <button type="button" class="ghost" id="clearSel">Clear selection</button>
+    </div>
+
+    <p class="hint">
+      Posted times refresh from absolute timestamps when you load a dump. Opening
+      many tabs may need popups allowed for this origin.
+    </p>
+
+    <div class="wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="check">
+              <input type="checkbox" id="selectAll" title="Select all visible" />
+            </th>
+            <th>Title</th>
+            <th>Company</th>
+            <th>Location</th>
+            <th>Salary</th>
+            <th>Posted</th>
+            <th>Easy Apply</th>
+            <th>Verified</th>
+            <th>Link</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <div class="empty" id="empty" hidden>No jobs match these filters.</div>
+    </div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

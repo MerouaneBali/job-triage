@@ -1,0 +1,11 @@
+# Personal LinkedIn dumps and parse output (do not publish)
+dumps/*
+!dumps/.gitkeep
+out/*
+!out/.gitkeep
+
+# OS / editor
+.DS_Store
+*.log
+.idea/
+.vscode/

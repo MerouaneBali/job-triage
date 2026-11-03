@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>LinkedIn Jobs dump bookmarklet</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f3ee;
+        --ink: #1a1a1a;
+        --accent: #0a66c2;
+        --card: #fff;
+      }
+      body {
+        margin: 0;
+        font: 16px/1.5 "Segoe UI", system-ui, sans-serif;
+        background: radial-gradient(circle at top left, #e8f0fa, var(--bg) 45%);
+        color: var(--ink);
+        min-height: 100vh;
+      }
+      main {
+        max-width: 40rem;
+        margin: 0 auto;
+        padding: 3rem 1.25rem 4rem;
+      }
+      h1 {
+        font-size: 1.75rem;
+        line-height: 1.2;
+        margin: 0 0 0.75rem;
+      }
+      p {
+        margin: 0 0 1rem;
+      }
+      ol {
+        padding-left: 1.25rem;
+      }
+      li {
+        margin-bottom: 0.5rem;
+      }
+      .bookmarklet {
+        display: inline-block;
+        margin: 1rem 0 1.5rem;
+        padding: 0.85rem 1.15rem;
+        background: var(--accent);
+        color: #fff;
+        font-weight: 600;
+        text-decoration: none;
+        border-radius: 8px;
+      }
+      .note {
+        background: var(--card);
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        padding: 1rem 1.1rem;
+      }
+      code {
+        font-size: 0.9em;
+        background: #eee;
+        padding: 0.1em 0.35em;
+        border-radius: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Dump LinkedIn Jobs (live DOM)</h1>
+      <p>
+        A <strong>bookmarklet</strong> is a bookmark that runs a tiny script in
+        the current tab. This one downloads the page HTML you already see — same
+        idea as Save Page As, one click, unique timestamped filename.
+      </p>
+      <p>
+        Optional: Save Page As often works fine too. Use this when you want a
+        guaranteed live-DOM dump and non-colliding names.
+      </p>
+
+      <p>Drag this to your bookmarks bar:</p>
+      <a
+        class="bookmarklet"
+        href="javascript:(()=>{try{const t=new Date().toISOString();const stamp=t.replace(/[:.]/g,'-');const html='<!DOCTYPE html>\\n<!-- job-triage-dumped-at: '+t+' -->\\n'+document.documentElement.outerHTML;const blob=new Blob([html],{type:'text/html;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='linkedin-jobs-'+stamp+'.html';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(a.href);}catch(e){alert('Dump failed: '+e);}})();"
+        >Dump LinkedIn Jobs HTML</a
+      >
+
+      <ol>
+        <li>Open LinkedIn Jobs search results and scroll until cards you care about are loaded.</li>
+        <li>Click the bookmarklet → an <code>.html</code> file downloads to your browser’s Downloads folder (bookmarklets cannot write into <code>dumps/</code> directly).</li>
+        <li>
+          Move it into <code>job-triage/dumps/</code> and run:
+          <br />
+          <code>node parse-jobs.mjs</code>
+          (parses every HTML dump in <code>dumps/</code>)
+        </li>
+        <li>
+          Triage in the preview SPA:
+          <br />
+          <code>node preview-server.mjs</code> → <code>http://127.0.0.1:4173</code>
+        </li>
+      </ol>
+
+      <div class="note">
+        <p>
+          <strong>Safety:</strong> Client-side only — reads the current page and
+          triggers a download. No LinkedIn API calls, no Apply clicks. Works on
+          <em>any</em> page you click it on; use it on Jobs results after scrolling.
+        </p>
+        <p style="margin-bottom: 0">
+          Personal offline triage only. Don’t automate LinkedIn requests or Easy
+          Apply — that risks account restriction.
+        </p>
+      </div>
+    </main>
+  </body>
+</html>

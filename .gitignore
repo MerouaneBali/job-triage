@@ -1,8 +1,15 @@
 # Personal LinkedIn dumps and parse output (do not publish)
-dumps/*
-!dumps/.gitkeep
-out/*
-!out/.gitkeep
+data/dumps/**
+!data/dumps/.gitkeep
+!data/dumps/details/
+!data/dumps/details/.gitkeep
+data/stage1/**
+!data/stage1/.gitkeep
+data/stage2/**
+!data/stage2/.gitkeep
+
+# Dependencies
+node_modules/
 
 # OS / editor
 .DS_Store

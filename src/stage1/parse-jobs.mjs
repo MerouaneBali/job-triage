@@ -1,13 +1,11 @@
 #!/usr/bin/env node
 /**
- * Offline LinkedIn Jobs dump parser.
+ * Stage 1: parse LinkedIn Jobs list dumps → data/stage1/*.json
  *
  * Usage:
- *   node parse-jobs.mjs                  # all .html in dumps/
- *   node parse-jobs.mjs dumps/jobs.html  # one file
- *   node parse-jobs.mjs other-folder     # all .html in that folder
- *   node parse-jobs.mjs --csv
- *   node parse-jobs.mjs dumps/jobs.html --out out/jobs.json
+ *   node src/stage1/parse-jobs.mjs
+ *   node src/stage1/parse-jobs.mjs data/dumps/jobs.html
+ *   node src/stage1/parse-jobs.mjs --csv
  */
 
 import {
@@ -19,19 +17,24 @@ import {
   existsSync,
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
+const defaultDumpsDir = join(root, "data", "dumps");
+const defaultStage1Dir = join(root, "data", "stage1");
 
 const args = process.argv.slice(2);
 if (args.includes("--help")) {
-  console.log(`Usage: node parse-jobs.mjs [path] [--csv] [--out path]
+  console.log(`Usage: node src/stage1/parse-jobs.mjs [path] [--csv] [--out path]
 
 Parses LinkedIn Jobs search dumps (Save Page As or bookmarklet).
 
   path   Optional. File or folder to parse.
-         Default: dumps/ (all .html / .htm files)
+         Default: data/dumps/ (all .html / .htm files)
 
-Always writes JSON for the preview SPA (node preview-server.mjs).
+Writes JSON to data/stage1/ for the preview SPA and stage-2 fetch.
 With --csv, also writes a CSV alongside.
---out applies when parsing a single file (basename used for folder batches).`);
+--out applies when parsing a single file.`);
   process.exit(0);
 }
 
@@ -40,7 +43,7 @@ const outArgIdx = args.indexOf("--out");
 const explicitOut =
   outArgIdx >= 0 ? resolve(args[outArgIdx + 1]).replace(/\.(json|csv)$/i, "") : null;
 const targetArg = args.find((a) => !a.startsWith("--"));
-const targetPath = resolve(targetArg || "dumps");
+const targetPath = resolve(targetArg || defaultDumpsDir);
 
 /** Decode common HTML entities in attribute/text snippets. */
 function decodeEntities(s) {
@@ -174,7 +177,7 @@ function parseDumpFile(inputPath, { wantCsv, outBaseOverride }) {
 
   const outBase =
     outBaseOverride ||
-    join(resolve("out"), basename(inputPath).replace(/\.(html?|txt)$/i, ""));
+    join(defaultStage1Dir, basename(inputPath).replace(/\.(html?|txt)$/i, ""));
   const jsonPath = `${outBase}.json`;
   const csvPath = `${outBase}.csv`;
 
@@ -411,5 +414,6 @@ for (const file of inputs) {
   if (inputs.length > 1) console.log("");
 }
 
-console.log(`Preview: node preview-server.mjs → http://127.0.0.1:4173`);
+console.log(`Preview: npm run preview → http://127.0.0.1:4173`);
+console.log(`Details: npm run fetch-details -- data/stage1/<file>.json`);
 if (failures > 0) process.exit(2);

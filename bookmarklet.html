@@ -83,29 +83,33 @@
 
       <ol>
         <li>Open LinkedIn Jobs search results and scroll until cards you care about are loaded.</li>
-        <li>Click the bookmarklet → an <code>.html</code> file downloads to your browser’s Downloads folder (bookmarklets cannot write into <code>dumps/</code> directly).</li>
+        <li>Click the bookmarklet → an <code>.html</code> file downloads to your browser’s Downloads folder (bookmarklets cannot write into <code>data/dumps/</code> directly).</li>
         <li>
-          Move it into <code>job-triage/dumps/</code> and run:
+          Move it into <code>data/dumps/</code> and run:
           <br />
-          <code>node parse-jobs.mjs</code>
-          (parses every HTML dump in <code>dumps/</code>)
+          <code>npm run parse</code>
         </li>
         <li>
-          Triage in the preview SPA:
+          Fetch descriptions (guest browser):
           <br />
-          <code>node preview-server.mjs</code> → <code>http://127.0.0.1:4173</code>
+          <code>npm run fetch-details -- data/stage1/your-file.json</code>
+        </li>
+        <li>
+          Triage:
+          <br />
+          <code>npm run preview</code> → <code>http://127.0.0.1:4173</code>
         </li>
       </ol>
 
       <div class="note">
         <p>
-          <strong>Safety:</strong> Client-side only — reads the current page and
-          triggers a download. No LinkedIn API calls, no Apply clicks. Works on
-          <em>any</em> page you click it on; use it on Jobs results after scrolling.
+          <strong>Safety:</strong> This bookmarklet is client-side only — reads the
+          current page and triggers a download. Stage-2 fetch uses a separate
+          ephemeral Playwright window; do not log into LinkedIn there.
         </p>
         <p style="margin-bottom: 0">
-          Personal offline triage only. Don’t automate LinkedIn requests or Easy
-          Apply — that risks account restriction.
+          Personal offline triage only. Don’t automate Easy Apply or use your
+          logged-in profile for scraping.
         </p>
       </div>
     </main>

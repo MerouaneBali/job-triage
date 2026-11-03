@@ -199,6 +199,33 @@ th.check {
   color: var(--muted);
 }
 
+.desc-cell {
+  max-width: 18rem;
+  font-size: 0.85rem;
+}
+
+.desc summary {
+  cursor: pointer;
+  color: var(--ink);
+  list-style: none;
+}
+
+.desc summary::-webkit-details-marker {
+  display: none;
+}
+
+.desc pre {
+  margin: 0.5rem 0 0;
+  white-space: pre-wrap;
+  font: inherit;
+  max-height: 16rem;
+  overflow: auto;
+  padding: 0.5rem;
+  background: #f7f9fb;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+}
+
 .muted {
   color: var(--muted);
 }

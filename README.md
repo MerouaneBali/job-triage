@@ -1,77 +1,65 @@
-# Job triage (LinkedIn dumps → JSON/CSV + preview SPA)
+# Job triage
 
-Personal offline helper: dump the Jobs results page, parse stable fields, then triage in a local preview app (select rows, bulk-open links).
+Personal offline helper to **list → detail → triage** LinkedIn jobs before you apply.
 
-## Workflow
+## Flow
 
-1. LinkedIn search + filters + scroll until cards load  
-2. **Save Page As** (Webpage, HTML Only) **or** the optional bookmarklet  
-3. Put the file in `dumps/`  
-4. Parse → open the preview SPA  
+1. **Stage 1 — list cards**  
+   Dump the Jobs search page (Save Page As or bookmarklet) into `data/dumps/`, parse to JSON.
+2. **Stage 2 — descriptions**  
+   Guest Playwright browser opens each job URL (not your Chrome profile), saves HTML, extracts description. Pauses if captcha/manual help needed.
+3. **Preview**  
+   Local SPA merges stage-1 + stage-2 for filtering and bulk-open.
 
 ```bash
-cd ~/Work/job-triage
+npm install
 
-node parse-jobs.mjs                 # all .html in dumps/
-node parse-jobs.mjs dumps/one.html  # one file
-node parse-jobs.mjs other-folder    # all .html in that folder
-node parse-jobs.mjs --csv           # also write CSV for Excel/Sheets (optional)
+# Stage 1: parse list dumps (default folder data/dumps/)
+npm run parse
+# or: node src/stage1/parse-jobs.mjs data/dumps/one.html
+# --csv also writes a CSV for Excel/Sheets (optional; preview uses JSON)
 
-# Triage UI (reads out/*.json — edit the SPA once, not per dump)
-node preview-server.mjs
+# Stage 2: fetch descriptions for a stage-1 file
+npm run fetch-details -- data/stage1/linkedin-jobs-….json --limit 2
+# full run:
+npm run fetch-details -- data/stage1/linkedin-jobs-….json
+# re-parse already-saved detail HTML (no browser):
+npm run fetch-details -- data/stage1/….json --reparse-only
+# optional proxy for later IP rotation:
+npm run fetch-details -- data/stage1/….json --proxy http://127.0.0.1:7890
+
+# Preview UI
+npm run preview
 # → http://127.0.0.1:4173
 ```
 
-Each parse always writes `out/….json` (what the preview SPA reads).  
-`--csv` is optional: it also writes `out/….csv` if you want to open the same jobs in Excel or Google Sheets. You do not need it for the preview.
+## Layout
 
-## Preview SPA
+```
+data/dumps/           # list HTML dumps (+ details/ for stage-2 HTML)
+data/stage1/          # list JSON
+data/stage2/          # detail JSON (same basename as stage-1)
+src/stage1/           # parse-jobs.mjs
+src/stage2/           # fetch-details.mjs, parse-detail.mjs
+src/preview/          # triage SPA
+src/preview-server.mjs
+bookmarklet.html
+```
 
-One light vanilla app in `preview/`, served by `preview-server.mjs` (no npm deps):
+`data/**` dumps and JSON are gitignored (personal).
 
-- Dropdown of every JSON dump in `out/`  
-- Company column shows logo (when present) + name  
-- Filter by text, Easy Apply, has salary  
-- Select all / deselect visible rows  
-- **Open selected** (staggered tabs; allow popups if blocked)  
-- Posted “ago” labels recomputed from `postedAt` when you load a dump  
+## Stage 2 notes
 
-Change the UI in `preview/` once — all dumps pick it up after refresh.
+- **Headed Chromium** by default so you can solve captchas. Do **not** log into LinkedIn in that window.
+- Sessions are **ephemeral** (no profile / storageState); closed when the script exits.
+- **Resume:** re-run skips jobs already `status: "ok"` with a description.
+- **`--delay`** base wait between jobs (default 4000ms + jitter).
+- **`--proxy` / `HTTP_PROXY`:** for VPN/proxy rotation later.
 
-## Save Page As vs bookmarklet
+## Bookmarklet (optional)
 
-Both can work. Save Page As lets you pick a folder; the bookmarklet always downloads to your browser’s Downloads folder (browsers block bookmarklets from choosing `dumps/`), then you move the file.
+Open `bookmarklet.html`, drag **Dump LinkedIn Jobs HTML** to the bookmarks bar. Downloads go to your browser Downloads folder — move files into `data/dumps/`. Unique timestamped names; Save Page As can overwrite by tab title.
 
-| | Save Page As | Bookmarklet |
-|---|---|---|
-| Folder | You choose | Downloads only |
-| Filename | Tab title (can overwrite) | `linkedin-jobs-{UTC-stamp}.html` (unique) |
-| Dump stamp | File modified time | Embeds `<!-- job-triage-dumped-at: … -->` |
+## Posted times (stage 1)
 
-The bookmarklet is optional convenience: one click, live DOM, unique name. It only reads the current tab’s HTML and downloads it — no LinkedIn API calls. It runs on whatever page you’re on when you click it.
-
-Setup: open `bookmarklet.html`, drag **Dump LinkedIn Jobs HTML** to the bookmarks bar.
-
-## Posted times
-
-LinkedIn cards show relative text (`7 hours ago`). At parse time we:
-
-1. Resolve `dumpedAt` (bookmarklet marker → file mtime → now)  
-2. Convert each phrase to absolute `postedAt`  
-3. Keep `postedRaw` as seen on the card  
-4. Recompute a fresh `posted` label from `postedAt`
-
-The preview also recomputes “X ago” when you load a dump, so ages stay honest without re-parsing.
-
-## What gets extracted
-
-| Field | Source |
-|---|---|
-| `id` / `url` | `componentkey="job-card-component-ref-{id}"` |
-| `title` | `aria-label="Dismiss … job"` |
-| `company`, `location`, `salary` | Text heuristics inside each card |
-| `postedRaw` / `postedAt` / `posted` | Relative phrase → absolute → fresh label |
-| `easyApply`, `earlyApplicant`, `verified` | Phrase / badge detection |
-| `dumpedAt`, `parsedAt`, `source` | Dump/parse metadata |
-
-Parser intentionally **ignores hashed CSS classes** so LinkedIn style renames don’t break it. If `componentkey` or dismiss labels disappear, the script exits with a clear error instead of inventing junk.
+Relative phrases (`7 hours ago`) become absolute `postedAt` using dump time (bookmarklet marker → file mtime → now). Preview recomputes “ago” when you load a dump.

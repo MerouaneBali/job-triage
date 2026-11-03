@@ -26,13 +26,14 @@
       <input type="search" id="q" placeholder="Filter title or company" />
       <label><input type="checkbox" id="easyOnly" /> Easy Apply only</label>
       <label><input type="checkbox" id="salaryOnly" /> Has salary</label>
+      <label><input type="checkbox" id="hasDesc" /> Has description</label>
       <button type="button" id="openSelected" disabled>Open selected</button>
       <button type="button" class="ghost" id="clearSel">Clear selection</button>
     </div>
 
     <p class="hint">
-      Posted times refresh from absolute timestamps when you load a dump. Opening
-      many tabs may need popups allowed for this origin.
+      Posted times refresh from absolute timestamps when you load a dump. Descriptions
+      come from stage-2 fetch. Opening many tabs may need popups allowed for this origin.
     </p>
 
     <div class="wrap">
@@ -49,6 +50,7 @@
             <th>Posted</th>
             <th>Easy Apply</th>
             <th>Verified</th>
+            <th>Description</th>
             <th>Link</th>
           </tr>
         </thead>

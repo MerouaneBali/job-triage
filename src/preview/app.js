@@ -57,6 +57,19 @@ function companyCell(j) {
   return `<div class="company">${logo}<span class="company-name">${esc(name)}</span></div>`;
 }
 
+function descriptionCell(j) {
+  if (!j.description) {
+    return `<span class="pill off">${esc(j.detailStatus || "missing")}</span>`;
+  }
+  const short =
+    j.description.length > 160
+      ? `${j.description.slice(0, 160)}…`
+      : j.description;
+  return `<details class="desc"><summary>${esc(short)}</summary><pre>${esc(
+    j.description
+  )}</pre></details>`;
+}
+
 /** Normalize legacy array JSON or { jobs, …meta } payloads. */
 function normalizeDump(raw, fallbackName) {
   if (Array.isArray(raw)) {
@@ -93,6 +106,7 @@ const el = {
   q: document.getElementById("q"),
   easyOnly: document.getElementById("easyOnly"),
   salaryOnly: document.getElementById("salaryOnly"),
+  hasDesc: document.getElementById("hasDesc"),
   selectAll: document.getElementById("selectAll"),
   openSelected: document.getElementById("openSelected"),
   clearSel: document.getElementById("clearSel"),
@@ -104,8 +118,9 @@ function filteredJobs() {
   return state.data.jobs.filter((j) => {
     if (el.easyOnly.checked && !j.easyApply) return false;
     if (el.salaryOnly.checked && !j.salary) return false;
+    if (el.hasDesc.checked && !j.description) return false;
     if (!q) return true;
-    const hay = `${j.title || ""} ${j.company || ""}`.toLowerCase();
+    const hay = `${j.title || ""} ${j.company || ""} ${j.description || ""}`.toLowerCase();
     return hay.includes(q);
   });
 }
@@ -125,12 +140,14 @@ function renderMeta() {
   if (!state.data) {
     el.meta.textContent = state.dumps.length
       ? "Pick a dump to triage."
-      : "No JSON dumps in out/. Parse a dump first.";
+      : "No JSON in data/stage1/. Run stage-1 parse first.";
     return;
   }
   const d = state.data;
+  const withDesc = d.jobs.filter((j) => j.description).length;
   el.meta.textContent = [
     `${d.jobs.length} jobs`,
+    `${withDesc} with description`,
     d.dumpedAt ? `dumped ${d.dumpedAt}` : null,
     d.source ? `source ${d.source}` : null,
     state.currentName ? `file ${state.currentName}` : null,
@@ -165,6 +182,7 @@ function renderTable() {
             ? '<span class="pill">Yes</span>'
             : '<span class="pill off">No</span>'
         }</td>` +
+        `<td class="desc-cell">${descriptionCell(j)}</td>` +
         `<td><a href="${esc(j.url)}" target="_blank" rel="noopener">Open</a></td>` +
         `</tr>`
       );
@@ -191,7 +209,7 @@ function fillDumpSelect() {
   el.dumpSelect.innerHTML = state.dumps
     .map(
       (d) =>
-        `<option value="${esc(d.name)}">${esc(d.name)} (${d.jobCount ?? "?"})</option>`
+        `<option value="${esc(d.name)}">${esc(d.name)} (${d.jobCount ?? "?"} jobs, ${d.detailsOk ?? 0} desc)</option>`
     )
     .join("");
   if (!state.dumps.length) {
@@ -289,7 +307,7 @@ el.refreshDumps.addEventListener("click", () => {
   });
 });
 
-for (const node of [el.q, el.easyOnly, el.salaryOnly]) {
+for (const node of [el.q, el.easyOnly, el.salaryOnly, el.hasDesc]) {
   node.addEventListener("input", renderTable);
   node.addEventListener("change", renderTable);
 }

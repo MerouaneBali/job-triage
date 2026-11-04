@@ -6,6 +6,7 @@ import { CompanyLogo } from "@/components/company-logo";
 import { DecisionBadge } from "@/components/decision-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { JobRow } from "@/lib/types";
 import { Copy } from "lucide-react";
 
@@ -26,12 +27,41 @@ async function copyText(label: string, text: string) {
   }
 }
 
+function ApplyQueueSkeleton() {
+  return (
+    <ul className="space-y-3" aria-busy="true" aria-label="Loading jobs">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <li key={i} className="rounded-xl border bg-card p-4 shadow-sm">
+          <div className="flex gap-3">
+            <Skeleton className="size-12 shrink-0 rounded-md" />
+            <div className="min-w-0 flex-1 space-y-2">
+              <div className="flex gap-2">
+                <Skeleton className="h-5 w-16" />
+                <Skeleton className="h-5 w-14" />
+              </div>
+              <Skeleton className="h-5 w-3/4 max-w-sm" />
+              <Skeleton className="h-4 w-1/2 max-w-[200px]" />
+            </div>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Skeleton className="h-11 w-36" />
+            <Skeleton className="h-11 w-24" />
+            <Skeleton className="h-11 w-28" />
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function ApplyQueue({
   jobs,
   onOpenJob,
+  loading = false,
 }: {
   jobs: JobRow[];
   onOpenJob: (job: JobRow) => void;
+  loading?: boolean;
 }) {
   const queue = useMemo(() => {
     const apply = jobs.filter((j) => j.decision === "apply");
@@ -44,6 +74,10 @@ export function ApplyQueue({
 
   const applyCount = queue.filter((j) => j.decision === "apply").length;
   const maybeCount = queue.filter((j) => j.decision === "maybe").length;
+
+  if (loading) {
+    return <ApplyQueueSkeleton />;
+  }
 
   if (!queue.length) {
     return (
@@ -60,126 +94,126 @@ export function ApplyQueue({
         {applyCount} apply · {maybeCount} maybe
       </p>
       <ul className="space-y-3">
-      {queue.map((job) => {
-        const open = expanded === String(job.id);
-        const outreach = job.materials?.outreachMessage?.trim();
-        const cover = job.materials?.coverLetter?.trim();
-        return (
-          <li
-            key={job.id}
-            className="rounded-xl border bg-card p-4 shadow-sm"
-          >
-            <div className="flex gap-3">
-              <CompanyLogo
-                src={job.logoUrl}
-                company={job.company}
-                className="size-12"
-              />
-              <div className="min-w-0 flex-1 space-y-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <DecisionBadge decision={job.decision ?? null} />
-                  {job.fitScore != null ? (
-                    <Badge variant="secondary">Score {job.fitScore}</Badge>
+        {queue.map((job) => {
+          const open = expanded === String(job.id);
+          const outreach = job.materials?.outreachMessage?.trim();
+          const cover = job.materials?.coverLetter?.trim();
+          return (
+            <li
+              key={job.id}
+              className="rounded-xl border bg-card p-4 shadow-sm"
+            >
+              <div className="flex gap-3">
+                <CompanyLogo
+                  src={job.logoUrl}
+                  company={job.company}
+                  className="size-12"
+                />
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <DecisionBadge decision={job.decision ?? null} />
+                    {job.fitScore != null ? (
+                      <Badge variant="secondary">Score {job.fitScore}</Badge>
+                    ) : null}
+                  </div>
+                  <h3 className="text-base font-semibold leading-snug">
+                    {job.title || "Untitled"}
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    {[job.company, job.location].filter(Boolean).join(" · ")}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                {job.url ? (
+                  <a
+                    href={job.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg bg-[#0A66C2] px-3 text-sm font-medium text-white hover:bg-[#004182] sm:flex-none"
+                  >
+                    <LinkedInIcon className="size-4" />
+                    Open LinkedIn
+                  </a>
+                ) : null}
+                <Button
+                  variant="outline"
+                  className="min-h-11"
+                  onClick={() => onOpenJob(job)}
+                >
+                  Details
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="min-h-11"
+                  onClick={() =>
+                    setExpanded(open ? null : String(job.id))
+                  }
+                >
+                  {open ? "Hide materials" : "Materials"}
+                </Button>
+              </div>
+
+              {open ? (
+                <div className="mt-3 space-y-3 border-t pt-3">
+                  {outreach ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Outreach
+                        </p>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="min-h-11"
+                          onClick={() => void copyText("outreach", outreach)}
+                        >
+                          <Copy data-icon="inline-start" />
+                          Copy
+                        </Button>
+                      </div>
+                      <p className="rounded-md border bg-muted/40 p-3 text-sm whitespace-pre-wrap">
+                        {outreach}
+                      </p>
+                    </div>
+                  ) : null}
+                  {cover ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Cover letter
+                        </p>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="min-h-11"
+                          onClick={() => void copyText("cover letter", cover)}
+                        >
+                          <Copy data-icon="inline-start" />
+                          Copy
+                        </Button>
+                      </div>
+                      <p className="rounded-md border bg-muted/40 p-3 text-sm whitespace-pre-wrap">
+                        {cover}
+                      </p>
+                    </div>
+                  ) : null}
+                  {!outreach && !cover ? (
+                    <p className="text-sm text-muted-foreground">
+                      No materials yet (skipped generate or not apply/maybe).
+                    </p>
+                  ) : null}
+                  {job.evaluation?.recommendation ? (
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      {job.evaluation.recommendation}
+                    </p>
                   ) : null}
                 </div>
-                <h3 className="text-base font-semibold leading-snug">
-                  {job.title || "Untitled"}
-                </h3>
-                <p className="text-sm text-muted-foreground">
-                  {[job.company, job.location].filter(Boolean).join(" · ")}
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-3 flex flex-wrap gap-2">
-              {job.url ? (
-                <a
-                  href={job.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg bg-[#0A66C2] px-3 text-sm font-medium text-white hover:bg-[#004182] sm:flex-none"
-                >
-                  <LinkedInIcon className="size-4" />
-                  Open LinkedIn
-                </a>
               ) : null}
-              <Button
-                variant="outline"
-                className="min-h-11"
-                onClick={() => onOpenJob(job)}
-              >
-                Details
-              </Button>
-              <Button
-                variant="ghost"
-                className="min-h-11"
-                onClick={() =>
-                  setExpanded(open ? null : String(job.id))
-                }
-              >
-                {open ? "Hide materials" : "Materials"}
-              </Button>
-            </div>
-
-            {open ? (
-              <div className="mt-3 space-y-3 border-t pt-3">
-                {outreach ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Outreach
-                      </p>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        className="min-h-11"
-                        onClick={() => void copyText("outreach", outreach)}
-                      >
-                        <Copy data-icon="inline-start" />
-                        Copy
-                      </Button>
-                    </div>
-                    <p className="rounded-md border bg-muted/40 p-3 text-sm whitespace-pre-wrap">
-                      {outreach}
-                    </p>
-                  </div>
-                ) : null}
-                {cover ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Cover letter
-                      </p>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        className="min-h-11"
-                        onClick={() => void copyText("cover letter", cover)}
-                      >
-                        <Copy data-icon="inline-start" />
-                        Copy
-                      </Button>
-                    </div>
-                    <p className="rounded-md border bg-muted/40 p-3 text-sm whitespace-pre-wrap">
-                      {cover}
-                    </p>
-                  </div>
-                ) : null}
-                {!outreach && !cover ? (
-                  <p className="text-sm text-muted-foreground">
-                    No materials yet (skipped generate or not apply/maybe).
-                  </p>
-                ) : null}
-                {job.evaluation?.recommendation ? (
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    {job.evaluation.recommendation}
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-          </li>
-        );
-      })}
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

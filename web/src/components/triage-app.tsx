@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -45,6 +46,7 @@ export function TriageApp() {
   const [dumps, setDumps] = useState<DumpSummary[]>([]);
   const [dumpName, setDumpName] = useState<string | null>(null);
   const [detail, setDetail] = useState<DumpDetail | null>(null);
+  const [dumpsLoading, setDumpsLoading] = useState(true);
   const [loading, setLoading] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -64,6 +66,7 @@ export function TriageApp() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   const loadDumps = useCallback(async () => {
+    setDumpsLoading(true);
     try {
       const res = await fetch("/api/dumps");
       if (!res.ok) {
@@ -71,10 +74,18 @@ export function TriageApp() {
         throw new Error(err.error || `Dumps failed (${res.status})`);
       }
       const data = (await res.json()) as { dumps: DumpSummary[] };
-      setDumps(data.dumps || []);
-      setDumpName((prev) => prev || data.dumps?.[0]?.name || null);
+      const list = data.dumps || [];
+      setDumps(list);
+      setDumpName((prev) => {
+        const next = prev || list[0]?.name || null;
+        // Avoid empty-state flash between dumps settle and detail fetch.
+        if (next) setLoading(true);
+        return next;
+      });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to load dumps");
+    } finally {
+      setDumpsLoading(false);
     }
   }, []);
 
@@ -108,6 +119,8 @@ export function TriageApp() {
     await loadDumps();
     if (dumpName) await loadDetail(dumpName);
   }, [dumpName, loadDumps, loadDetail]);
+
+  const bootLoading = dumpsLoading || loading;
 
   const selectedJob = useMemo(
     () => detail?.jobs.find((j) => String(j.id) === selectedId) || null,
@@ -258,39 +271,46 @@ export function TriageApp() {
           </p>
         </div>
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-          <Select
-            key={dumps.map((d) => d.name).join("|") || "empty"}
-            value={
-              dumpName && dumps.some((d) => d.name === dumpName)
-                ? dumpName
-                : null
-            }
-            onValueChange={(v) => setDumpName(v)}
-          >
-            <SelectTrigger className="min-h-11 w-full min-w-0 flex-1 sm:min-w-[280px]">
-              <SelectValue placeholder="Select dump…" />
-            </SelectTrigger>
-            <SelectContent>
-              {dumps.map((d) => (
-                <SelectItem key={d.name} value={d.name}>
-                  {d.label || d.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {dumpsLoading ? (
+            <Skeleton className="h-11 w-full min-w-0 flex-1 sm:min-w-[280px]" />
+          ) : (
+            <Select
+              key={dumps.map((d) => d.name).join("|") || "empty"}
+              value={
+                dumpName && dumps.some((d) => d.name === dumpName)
+                  ? dumpName
+                  : null
+              }
+              onValueChange={(v) => setDumpName(v)}
+            >
+              <SelectTrigger className="min-h-11 w-full min-w-0 flex-1 sm:min-w-[280px]">
+                <SelectValue placeholder="Select dump…" />
+              </SelectTrigger>
+              <SelectContent>
+                {dumps.map((d) => (
+                  <SelectItem key={d.name} value={d.name}>
+                    {d.label || d.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           <Button
             variant="outline"
             size="icon"
             className="min-h-11 min-w-11"
             onClick={() => void refreshAll()}
             aria-label="Refresh"
+            disabled={bootLoading}
           >
-            <RefreshCw className={cn(loading && "animate-spin")} />
+            <RefreshCw className={cn(bootLoading && "animate-spin")} />
           </Button>
         </div>
       </header>
 
-      {meta ? (
+      {bootLoading && !meta ? (
+        <Skeleton className="h-3 w-64 max-w-full" />
+      ) : meta ? (
         <p className="text-xs text-muted-foreground">{meta}</p>
       ) : null}
 
@@ -326,6 +346,7 @@ export function TriageApp() {
         <ApplyQueue
           jobs={detail?.jobs || []}
           onOpenJob={openJob}
+          loading={bootLoading}
         />
       ) : null}
 
@@ -510,75 +531,108 @@ export function TriageApp() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.map((job) => (
-              <TableRow
-                key={job.id}
-                className={cn(
-                  "cursor-pointer",
-                  selectedId === String(job.id) && "bg-muted/60"
-                )}
-                onClick={() => openJob(job)}
-              >
-                <TableCell>
-                  <DecisionBadge decision={job.decision ?? null} />
-                </TableCell>
-                <TableCell className="tabular-nums">
-                  {job.fitScore == null ? "—" : job.fitScore}
-                </TableCell>
-                <TableCell className="tabular-nums text-muted-foreground">
-                  {job.confidence == null
-                    ? "—"
-                    : `${Math.round(job.confidence * 100)}%`}
-                </TableCell>
-                <TableCell className="max-w-[280px] truncate font-medium">
-                  {job.title || "—"}
-                </TableCell>
-                <TableCell>
-                  <div className="flex max-w-[200px] items-center gap-2">
-                    <CompanyLogo src={job.logoUrl} company={job.company} />
-                    <span className="truncate">{job.company || "—"}</span>
-                  </div>
-                </TableCell>
-                <TableCell className="max-w-[160px] truncate text-muted-foreground">
-                  {job.location || "—"}
-                </TableCell>
-                <TableCell>
-                  {job.evaluation?.eligibility?.status ? (
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "capitalize",
-                        job.evaluation.eligibility.status === "pass" &&
-                          "border-emerald-600/40 bg-emerald-600/15 text-emerald-900",
-                        job.evaluation.eligibility.status === "fail" &&
-                          "border-rose-500/40 bg-rose-500/15 text-rose-900",
-                        job.evaluation.eligibility.status === "unknown" &&
-                          "border-zinc-400/40 bg-zinc-500/10"
+            {bootLoading
+              ? Array.from({ length: 6 }).map((_, i) => (
+                  <TableRow key={`sk-${i}`}>
+                    <TableCell>
+                      <Skeleton className="h-5 w-14" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-5 w-8" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-5 w-10" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-5 w-48 max-w-full" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Skeleton className="size-8 shrink-0 rounded-md" />
+                        <Skeleton className="h-5 w-24" />
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-5 w-28" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-5 w-14" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-5 w-16" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-5 w-4" />
+                    </TableCell>
+                  </TableRow>
+                ))
+              : filtered.map((job) => (
+                  <TableRow
+                    key={job.id}
+                    className={cn(
+                      "cursor-pointer",
+                      selectedId === String(job.id) && "bg-muted/60"
+                    )}
+                    onClick={() => openJob(job)}
+                  >
+                    <TableCell>
+                      <DecisionBadge decision={job.decision ?? null} />
+                    </TableCell>
+                    <TableCell className="tabular-nums">
+                      {job.fitScore == null ? "—" : job.fitScore}
+                    </TableCell>
+                    <TableCell className="tabular-nums text-muted-foreground">
+                      {job.confidence == null
+                        ? "—"
+                        : `${Math.round(job.confidence * 100)}%`}
+                    </TableCell>
+                    <TableCell className="max-w-[280px] truncate font-medium">
+                      {job.title || "—"}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex max-w-[200px] items-center gap-2">
+                        <CompanyLogo src={job.logoUrl} company={job.company} />
+                        <span className="truncate">{job.company || "—"}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="max-w-[160px] truncate text-muted-foreground">
+                      {job.location || "—"}
+                    </TableCell>
+                    <TableCell>
+                      {job.evaluation?.eligibility?.status ? (
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "capitalize",
+                            job.evaluation.eligibility.status === "pass" &&
+                              "border-emerald-600/40 bg-emerald-600/15 text-emerald-900",
+                            job.evaluation.eligibility.status === "fail" &&
+                              "border-rose-500/40 bg-rose-500/15 text-rose-900",
+                            job.evaluation.eligibility.status === "unknown" &&
+                              "border-zinc-400/40 bg-zinc-500/10"
+                          )}
+                        >
+                          {job.evaluation.eligibility.status}
+                        </Badge>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
                       )}
-                    >
-                      {job.evaluation.eligibility.status}
-                    </Badge>
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
-                </TableCell>
-                <TableCell className="whitespace-nowrap text-muted-foreground">
-                  {job.posted || "—"}
-                </TableCell>
-                <TableCell>{job.easyApply ? "✓" : ""}</TableCell>
-              </TableRow>
-            ))}
-            {!filtered.length && (
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                      {job.posted || "—"}
+                    </TableCell>
+                    <TableCell>{job.easyApply ? "✓" : ""}</TableCell>
+                  </TableRow>
+                ))}
+            {!bootLoading && !filtered.length && (
               <TableRow>
                 <TableCell
                   colSpan={9}
                   className="h-24 text-center text-muted-foreground"
                 >
-                  {loading
-                    ? "Loading…"
-                    : dumpName
-                      ? "No jobs match filters"
-                      : "Parse a dump (Stage 1) to begin"}
+                  {dumpName
+                    ? "No jobs match filters"
+                    : "Parse a dump (Stage 1) to begin"}
                 </TableCell>
               </TableRow>
             )}

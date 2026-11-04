@@ -43,6 +43,7 @@ Options:
   --proxy URL     HTTP(S) proxy (else HTTP_PROXY / HTTPS_PROXY env)
   --headed        Force headed (default)
   --headless      Headless (harder to solve captchas)
+  --no-pause      Never wait for Enter (unattended / Pi); save HTML and continue on failure
   --reparse-only  Re-parse saved data/dumps/details/{id}.html into SQLite (no browser)
 
 Never log into the Playwright window with your LinkedIn account.`);
@@ -64,6 +65,7 @@ const proxyUrl =
   process.env.https_proxy ||
   null;
 const headless = args.includes("--headless");
+const noPause = args.includes("--no-pause");
 const reparseOnly = args.includes("--reparse-only");
 
 function sleep(ms) {
@@ -278,9 +280,11 @@ try {
             ? "Login wall / captcha / challenge suspected (no JD extracted yet)."
             : "Description not found yet."
         );
-        if (headless) {
+        if (noPause || headless) {
           console.log(
-            "Headless often gets a login shell. Re-run without --headless and solve any check in the window."
+            noPause
+              ? "Unattended (--no-pause): skipping interactive wait."
+              : "Headless often gets a login shell. Re-run headed without --no-pause to solve checks manually."
           );
           break;
         }

@@ -177,16 +177,26 @@ export function startParse(htmlName: string): PipelineJob {
   );
 }
 
-export function startFetch(dumpName: string, limit?: number): PipelineJob {
+export function startFetch(
+  dumpName: string,
+  opts: { limit?: number; noPause?: boolean; headless?: boolean } = {}
+): PipelineJob {
   const stem = dumpName.replace(/\.json$/i, "");
   if (!stem) {
     throw Object.assign(new Error("Invalid dump basename"), { status: 400 });
   }
   const args = [join("src", "stage2", "fetch-details.mjs"), stem];
-  if (limit != null && Number.isFinite(limit) && limit > 0) {
-    args.push("--limit", String(Math.floor(limit)));
+  if (opts.limit != null && Number.isFinite(opts.limit) && opts.limit > 0) {
+    args.push("--limit", String(Math.floor(opts.limit)));
   }
+  if (opts.noPause !== false) args.push("--no-pause");
+  if (opts.headless) args.push("--headless");
   return startChild("fetch", args, "fetch-details");
+}
+
+/** Save uploaded HTML into data/dumps/ then run Stage 1 parse. */
+export function startParseUpload(savedHtmlName: string): PipelineJob {
+  return startParse(savedHtmlName);
 }
 
 export function startStage3(

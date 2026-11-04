@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -14,12 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { HtmlDump, PipelineJob } from "@/lib/types";
-import {
-  Bot,
-  FileSearch,
-  Loader2,
-  Sparkles,
-} from "lucide-react";
+import { Bot, FileSearch, Loader2, Sparkles, Upload } from "lucide-react";
 
 type Props = {
   dumpName: string | null;
@@ -33,10 +27,14 @@ export function PipelineBar({ dumpName, onJobFinished }: Props) {
   const [stage3Limit, setStage3Limit] = useState("3");
   const [force, setForce] = useState(false);
   const [skipGenerate, setSkipGenerate] = useState(false);
+  const [noPause, setNoPause] = useState(true);
+  const [headless, setHeadless] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [job, setJob] = useState<PipelineJob | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     void (async () => {
@@ -136,18 +134,71 @@ export function PipelineBar({ dumpName, onJobFinished }: Props) {
     }
   }
 
+  async function onUpload(file: File | null) {
+    if (!file) return;
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.set("file", file);
+      form.set("parse", "true");
+      const res = await fetch("/api/dumps/upload", {
+        method: "POST",
+        body: form,
+      });
+      const data = (await res.json()) as {
+        htmlName?: string;
+        job?: PipelineJob;
+        error?: string;
+      };
+      if (!res.ok) {
+        toast.error(data.error || "Upload failed");
+        return;
+      }
+      toast.success(`Uploaded ${data.htmlName}`);
+      await refreshHtml();
+      if (data.htmlName) setHtmlName(data.htmlName);
+      if (data.job) {
+        setJob(data.job);
+        attachStream(data.job.id);
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
   return (
     <div className="space-y-3 rounded-xl border bg-card p-4 shadow-sm">
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="space-y-2 rounded-lg border border-dashed p-3">
           <div className="flex items-center gap-2 text-sm font-medium">
-            <FileSearch className="size-4 text-sky-700" />
+            <FileSearch className="size-4 shrink-0 text-sky-700" />
             Stage 1 — Parse list HTML
           </div>
           <p className="text-xs text-muted-foreground">
-            Turn a saved Jobs search page into job cards in SQLite.
+            Upload a Jobs search HTML dump (phone-friendly) or parse one already
+            on disk.
           </p>
           <div className="flex flex-wrap gap-2">
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".html,.htm,text/html"
+              className="sr-only"
+              onChange={(e) => void onUpload(e.target.files?.[0] ?? null)}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11"
+              disabled={busy || uploading}
+              onClick={() => fileRef.current?.click()}
+            >
+              <Upload data-icon="inline-start" />
+              {uploading ? "Uploading…" : "Upload HTML"}
+            </Button>
             <Select
               key={htmlDumps.map((d) => d.name).join("|") || "empty"}
               value={
@@ -157,8 +208,8 @@ export function PipelineBar({ dumpName, onJobFinished }: Props) {
               }
               onValueChange={(v) => setHtmlName(v ?? "")}
             >
-              <SelectTrigger className="min-w-[180px] flex-1">
-                <SelectValue placeholder="Select HTML…" />
+              <SelectTrigger className="min-h-11 min-w-[160px] flex-1">
+                <SelectValue placeholder="On disk…" />
               </SelectTrigger>
               <SelectContent>
                 {htmlDumps.map((d) => (
@@ -169,6 +220,7 @@ export function PipelineBar({ dumpName, onJobFinished }: Props) {
               </SelectContent>
             </Select>
             <Button
+              className="min-h-11"
               disabled={busy || !htmlName}
               onClick={() =>
                 start("/api/pipeline/parse", { htmlName }, "Stage 1 parse")
@@ -182,23 +234,39 @@ export function PipelineBar({ dumpName, onJobFinished }: Props) {
 
         <div className="space-y-2 rounded-lg border border-dashed p-3">
           <div className="flex items-center gap-2 text-sm font-medium">
-            <Sparkles className="size-4 text-amber-700" />
+            <Sparkles className="size-4 shrink-0 text-amber-700" />
             Stage 2 — Fetch descriptions
           </div>
           <p className="text-xs text-muted-foreground">
-            Opens headed Chromium to pull guest job details into the DB.
+            Chromium pulls guest job details. Unattended skips Enter waits (Pi /
+            phone-friendly).
           </p>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Input
-              className="w-20"
+              className="min-h-11 w-20"
               inputMode="numeric"
               value={fetchLimit}
               onChange={(e) => setFetchLimit(e.target.value)}
               placeholder="limit"
               aria-label="Fetch limit"
             />
+            <label className="flex min-h-11 items-center gap-1.5 text-xs">
+              <Checkbox
+                checked={noPause}
+                onCheckedChange={(v) => setNoPause(v === true)}
+              />
+              Unattended
+            </label>
+            <label className="flex min-h-11 items-center gap-1.5 text-xs">
+              <Checkbox
+                checked={headless}
+                onCheckedChange={(v) => setHeadless(v === true)}
+              />
+              Headless
+            </label>
             <Button
               variant="secondary"
+              className="min-h-11"
               disabled={busy || !dumpName}
               onClick={() =>
                 start(
@@ -206,6 +274,8 @@ export function PipelineBar({ dumpName, onJobFinished }: Props) {
                   {
                     dumpName,
                     limit: Number(fetchLimit) || undefined,
+                    noPause,
+                    headless,
                   },
                   "Stage 2 fetch"
                 )
@@ -219,7 +289,7 @@ export function PipelineBar({ dumpName, onJobFinished }: Props) {
 
         <div className="space-y-2 rounded-lg border border-dashed p-3">
           <div className="flex items-center gap-2 text-sm font-medium">
-            <Bot className="size-4 text-emerald-700" />
+            <Bot className="size-4 shrink-0 text-emerald-700" />
             Stage 3 — Claude evaluate
           </div>
           <p className="text-xs text-muted-foreground">
@@ -227,21 +297,21 @@ export function PipelineBar({ dumpName, onJobFinished }: Props) {
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Input
-              className="w-20"
+              className="min-h-11 w-20"
               inputMode="numeric"
               value={stage3Limit}
               onChange={(e) => setStage3Limit(e.target.value)}
               placeholder="limit"
               aria-label="Stage 3 limit"
             />
-            <label className="flex items-center gap-1.5 text-xs">
+            <label className="flex min-h-11 items-center gap-1.5 text-xs">
               <Checkbox
                 checked={force}
                 onCheckedChange={(v) => setForce(v === true)}
               />
               Force
             </label>
-            <label className="flex items-center gap-1.5 text-xs">
+            <label className="flex min-h-11 items-center gap-1.5 text-xs">
               <Checkbox
                 checked={skipGenerate}
                 onCheckedChange={(v) => setSkipGenerate(v === true)}
@@ -249,6 +319,7 @@ export function PipelineBar({ dumpName, onJobFinished }: Props) {
               Skip generate
             </label>
             <Button
+              className="min-h-11"
               disabled={busy || !dumpName}
               onClick={() =>
                 start(
@@ -289,7 +360,7 @@ export function PipelineBar({ dumpName, onJobFinished }: Props) {
             </span>
             <button
               type="button"
-              className="hover:text-white"
+              className="min-h-11 px-2 hover:text-white"
               onClick={() => setLogs([])}
             >
               Clear

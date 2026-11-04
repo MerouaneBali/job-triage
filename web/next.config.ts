@@ -10,6 +10,13 @@ if (existsSync(repoEnv)) {
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["dotenv", "better-sqlite3"],
+  // Phone / Tailscale / LAN hosts hitting `next dev` (HMR + /_next/*).
+  // MagicDNS is multi-label (host.tailxxxx.ts.net) → need ** not *.
+  allowedDevOrigins: [
+    "**.ts.net",
+    "*.ts.net",
+    "127.0.0.1",
+  ],
   turbopack: {
     root: __dirname,
   },

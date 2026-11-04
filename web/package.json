@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --webpack -H 127.0.0.1 -p 4173",
+    "dev": "next dev --webpack -H ${HOST:-0.0.0.0} -p ${PORT:-4173}",
     "build": "next build --webpack",
-    "start": "next start -H 127.0.0.1 -p 4173",
+    "start": "next start -H ${HOST:-0.0.0.0} -p ${PORT:-4173}",
     "lint": "eslint"
   },
   "dependencies": {

@@ -7,12 +7,21 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   try {
-    const body = (await req.json()) as { dumpName?: string; limit?: number };
+    const body = (await req.json()) as {
+      dumpName?: string;
+      limit?: number;
+      noPause?: boolean;
+      headless?: boolean;
+    };
     const dumpName = body.dumpName ? safeBasename(body.dumpName) : null;
     if (!dumpName) {
       return NextResponse.json({ error: "Invalid dumpName" }, { status: 400 });
     }
-    const job = startFetch(dumpName, body.limit);
+    const job = startFetch(dumpName, {
+      limit: body.limit,
+      noPause: body.noPause !== false,
+      headless: Boolean(body.headless),
+    });
     return NextResponse.json({ job });
   } catch (e) {
     const status =

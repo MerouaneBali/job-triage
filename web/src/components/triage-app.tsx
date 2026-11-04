@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ApplyQueue } from "@/components/apply-queue";
 import { CompanyLogo } from "@/components/company-logo";
 import { DecisionBadge } from "@/components/decision-badge";
 import { JobDetailSheet } from "@/components/job-detail-sheet";
@@ -27,10 +28,11 @@ import {
 } from "@/components/ui/table";
 import type { DumpDetail, DumpSummary, JobRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { RefreshCw } from "lucide-react";
+import { Briefcase, ListFilter, RefreshCw, Workflow } from "lucide-react";
 import { toast } from "sonner";
 
 type SortKey = "fitScore" | "postedAt" | "company" | "title" | "decision";
+type AppView = "apply" | "triage" | "pipeline";
 
 function decisionRank(d: JobRow["decision"]) {
   if (d === "apply") return 0;
@@ -46,6 +48,8 @@ export function TriageApp() {
   const [loading, setLoading] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [view, setView] = useState<AppView>("apply");
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const [search, setSearch] = useState("");
   const [decisionFilter, setDecisionFilter] = useState<string>("all");
@@ -60,10 +64,18 @@ export function TriageApp() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   const loadDumps = useCallback(async () => {
-    const res = await fetch("/api/dumps");
-    const data = (await res.json()) as { dumps: DumpSummary[] };
-    setDumps(data.dumps || []);
-    setDumpName((prev) => prev || data.dumps?.[0]?.name || null);
+    try {
+      const res = await fetch("/api/dumps");
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(err.error || `Dumps failed (${res.status})`);
+      }
+      const data = (await res.json()) as { dumps: DumpSummary[] };
+      setDumps(data.dumps || []);
+      setDumpName((prev) => prev || data.dumps?.[0]?.name || null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to load dumps");
+    }
   }, []);
 
   const loadDetail = useCallback(async (name: string) => {
@@ -231,21 +243,21 @@ export function TriageApp() {
     : null;
 
   return (
-    <div className="mx-auto flex w-full max-w-[1600px] flex-1 flex-col gap-4 p-4 md:p-6">
-      <header className="flex flex-wrap items-end justify-between gap-3">
+    <div className="mx-auto flex w-full max-w-[1600px] flex-1 flex-col gap-4 p-4 pb-24 md:p-6 md:pb-6">
+      <header className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
             Local triage
           </p>
-          <h1 className="font-heading text-3xl font-semibold tracking-tight">
+          <h1 className="font-heading text-2xl font-semibold tracking-tight sm:text-3xl">
             Job triage
           </h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Parse dumps, fetch guest details, run Claude Stage 3, then scan
-            evaluations — you still apply manually.
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground hidden sm:block">
+            Parse dumps, fetch guest details, run Claude Stage 3, then apply
+            from your phone — you still apply manually.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
           <Select
             key={dumps.map((d) => d.name).join("|") || "empty"}
             value={
@@ -255,7 +267,7 @@ export function TriageApp() {
             }
             onValueChange={(v) => setDumpName(v)}
           >
-            <SelectTrigger className="min-w-[280px]">
+            <SelectTrigger className="min-h-11 w-full min-w-0 flex-1 sm:min-w-[280px]">
               <SelectValue placeholder="Select dump…" />
             </SelectTrigger>
             <SelectContent>
@@ -269,6 +281,7 @@ export function TriageApp() {
           <Button
             variant="outline"
             size="icon"
+            className="min-h-11 min-w-11"
             onClick={() => void refreshAll()}
             aria-label="Refresh"
           >
@@ -281,11 +294,43 @@ export function TriageApp() {
         <p className="text-xs text-muted-foreground">{meta}</p>
       ) : null}
 
-      <PipelineBar
-        dumpName={dumpName}
-        onJobFinished={() => void refreshAll()}
-      />
+      {/* Desktop top tabs */}
+      <div className="hidden gap-2 md:flex">
+        {(
+          [
+            ["apply", "Apply", Briefcase],
+            ["triage", "Triage", ListFilter],
+            ["pipeline", "Pipeline", Workflow],
+          ] as const
+        ).map(([key, label, Icon]) => (
+          <Button
+            key={key}
+            variant={view === key ? "default" : "outline"}
+            className="min-h-11"
+            onClick={() => setView(key)}
+          >
+            <Icon data-icon="inline-start" />
+            {label}
+          </Button>
+        ))}
+      </div>
 
+      {view === "pipeline" ? (
+        <PipelineBar
+          dumpName={dumpName}
+          onJobFinished={() => void refreshAll()}
+        />
+      ) : null}
+
+      {view === "apply" ? (
+        <ApplyQueue
+          jobs={detail?.jobs || []}
+          onOpenJob={openJob}
+        />
+      ) : null}
+
+      {view === "triage" ? (
+      <>
       <div className="space-y-3 rounded-xl border bg-card p-3 shadow-sm">
         <div className="flex flex-wrap gap-2">
           {(
@@ -300,18 +345,33 @@ export function TriageApp() {
             <Button
               key={key}
               size="sm"
+              className="min-h-11"
               variant={decisionFilter === key ? "default" : "outline"}
               onClick={() => setDecisionFilter(key)}
             >
               {label}
             </Button>
           ))}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="min-h-11 md:hidden"
+            onClick={() => setFiltersOpen((o) => !o)}
+          >
+            {filtersOpen ? "Hide filters" : "More filters"}
+          </Button>
         </div>
 
-        <div className="flex flex-wrap items-end gap-3">
+        <div
+          className={cn(
+            "flex flex-wrap items-end gap-3",
+            !filtersOpen && "max-md:hidden"
+          )}
+        >
           <div className="min-w-[200px] flex-1 space-y-1.5">
             <Label className="text-xs">Search</Label>
             <Input
+              className="min-h-11"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Title, company, recommendation…"
@@ -525,12 +585,42 @@ export function TriageApp() {
           </TableBody>
         </Table>
       </div>
+      </>
+      ) : null}
 
       <JobDetailSheet
         job={selectedJob}
         open={sheetOpen}
         onOpenChange={setSheetOpen}
       />
+
+      {/* Mobile bottom nav */}
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 backdrop-blur md:hidden">
+        <div className="mx-auto grid max-w-[1600px] grid-cols-3 gap-1 p-2">
+          {(
+            [
+              ["apply", "Apply", Briefcase],
+              ["triage", "Triage", ListFilter],
+              ["pipeline", "Pipeline", Workflow],
+            ] as const
+          ).map(([key, label, Icon]) => (
+            <button
+              key={key}
+              type="button"
+              className={cn(
+                "flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-lg text-xs font-medium",
+                view === key
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground"
+              )}
+              onClick={() => setView(key)}
+            >
+              <Icon className="size-5" />
+              {label}
+            </button>
+          ))}
+        </div>
+      </nav>
     </div>
   );
 }

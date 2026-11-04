@@ -1,15 +1,19 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
+import Database from "better-sqlite3";
 import { dataPaths } from "./paths";
 import type { DumpDetail, DumpSummary, HtmlDump, JobRow } from "./types";
 
-function stageNameFor(stage1Name: string) {
-  return stage1Name;
+function openAppDb() {
+  const path = dataPaths().db;
+  return new Database(path, { readonly: false, fileMustExist: false });
 }
 
-export function safeJsonName(name: string): string | null {
-  const base = basename(name);
-  if (base !== name || !base.endsWith(".json") || base.includes("..")) {
+export function safeBasename(name: string): string | null {
+  const base = basename(name)
+    .replace(/\.json$/i, "")
+    .replace(/\.html?$/i, "");
+  if (!base || base.includes("..") || base.includes("/") || base.includes("\\")) {
     return null;
   }
   return base;
@@ -23,70 +27,76 @@ export function safeHtmlName(name: string): string | null {
   return base;
 }
 
+function formatDumpLabel(d: {
+  basename: string;
+  dumped_at: string | null;
+  parsed_at: string | null;
+  job_count: number;
+  summary_apply: number;
+  summary_maybe: number;
+  summary_skip: number;
+  details_ok: number;
+}): string {
+  const when = d.parsed_at || d.dumped_at;
+  const dateBit = when
+    ? new Date(when).toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : d.basename;
+  const triage =
+    d.summary_apply || d.summary_maybe || d.summary_skip
+      ? ` · A${d.summary_apply}/M${d.summary_maybe}/S${d.summary_skip}`
+      : "";
+  return `${dateBit} · ${d.job_count} jobs · ${d.details_ok} desc${triage}`;
+}
+
 export function listDumps(): DumpSummary[] {
-  const { stage1, stage2, stage3 } = dataPaths();
-  if (!existsSync(stage1)) return [];
+  const { db: dbPath } = dataPaths();
+  if (!existsSync(dbPath)) return [];
+  const db = openAppDb();
+  try {
+    const rows = db
+      .prepare(
+        `
+      SELECT
+        d.*,
+        (SELECT COUNT(*) FROM jobs j WHERE j.dump_id = d.id) AS job_count,
+        (SELECT COUNT(*) FROM jobs j WHERE j.dump_id = d.id AND j.description IS NOT NULL AND length(j.description) > 0) AS details_ok
+      FROM dumps d
+      ORDER BY COALESCE(d.updated_at, d.parsed_at, d.dumped_at) DESC
+    `
+      )
+      .all() as Array<{
+      basename: string;
+      dumped_at: string | null;
+      parsed_at: string | null;
+      source_html: string | null;
+      updated_at: string;
+      summary_apply: number;
+      summary_maybe: number;
+      summary_skip: number;
+      job_count: number;
+      details_ok: number;
+    }>;
 
-  return readdirSync(stage1)
-    .filter((name) => name.endsWith(".json"))
-    .map((name) => {
-      const full = join(stage1, name);
-      const st = statSync(full);
-      let jobCount: number | null = null;
-      let dumpedAt: string | null = null;
-      let source: string | null = null;
-      let detailsOk = 0;
-      let stage3Apply = 0;
-      let stage3Maybe = 0;
-      let stage3Skip = 0;
-
-      try {
-        const raw = JSON.parse(readFileSync(full, "utf8"));
-        if (Array.isArray(raw)) {
-          jobCount = raw.length;
-        } else if (raw && typeof raw === "object") {
-          jobCount = Array.isArray(raw.jobs) ? raw.jobs.length : null;
-          dumpedAt = raw.dumpedAt ?? null;
-          source = raw.source ?? null;
-        }
-
-        const s2Path = join(stage2, stageNameFor(name));
-        if (existsSync(s2Path)) {
-          const s2 = JSON.parse(readFileSync(s2Path, "utf8"));
-          detailsOk = Array.isArray(s2.jobs)
-            ? s2.jobs.filter(
-                (j: { status?: string; description?: string }) =>
-                  j.status === "ok" && j.description
-              ).length
-            : 0;
-        }
-
-        const s3Path = join(stage3, stageNameFor(name));
-        if (existsSync(s3Path)) {
-          const s3 = JSON.parse(readFileSync(s3Path, "utf8"));
-          for (const j of s3.jobs || []) {
-            if (j.decision === "apply") stage3Apply += 1;
-            else if (j.decision === "maybe") stage3Maybe += 1;
-            else if (j.decision === "skip") stage3Skip += 1;
-          }
-        }
-      } catch {
-        // still list the file
-      }
-
-      return {
-        name,
-        mtime: st.mtime.toISOString(),
-        jobCount,
-        dumpedAt,
-        source,
-        detailsOk,
-        stage3Apply,
-        stage3Maybe,
-        stage3Skip,
-      };
-    })
-    .sort((a, b) => (a.mtime < b.mtime ? 1 : -1));
+    return rows.map((d) => ({
+      name: d.basename,
+      label: formatDumpLabel(d),
+      mtime: d.updated_at || d.parsed_at || d.dumped_at || new Date(0).toISOString(),
+      jobCount: d.job_count ?? null,
+      dumpedAt: d.dumped_at,
+      source: d.source_html,
+      detailsOk: d.details_ok ?? 0,
+      stage3Apply: d.summary_apply ?? 0,
+      stage3Maybe: d.summary_maybe ?? 0,
+      stage3Skip: d.summary_skip ?? 0,
+    }));
+  } finally {
+    db.close();
+  }
 }
 
 export function listHtmlDumps(): HtmlDump[] {
@@ -107,93 +117,80 @@ export function listHtmlDumps(): HtmlDump[] {
     .sort((a, b) => (a.mtime < b.mtime ? 1 : -1));
 }
 
+function parseJsonCol(s: string | null) {
+  if (!s) return null;
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
+
+function rowToJob(row: Record<string, unknown>): JobRow {
+  const evaluation = parseJsonCol(row.evaluation_json as string | null) as
+    | JobRow["evaluation"]
+    | null;
+  const qualify = parseJsonCol(row.qualify_json as string | null) as
+    | JobRow["qualify"]
+    | null;
+  return {
+    id: String(row.job_id),
+    title: (row.title as string) ?? null,
+    company: (row.company as string) ?? null,
+    location: (row.location as string) ?? null,
+    salary: (row.salary as string) ?? null,
+    posted: (row.posted as string) ?? null,
+    postedAt: (row.posted_at as string) ?? null,
+    easyApply: Boolean(row.easy_apply),
+    logoUrl: (row.logo_url as string) ?? null,
+    url: (row.url as string) ?? null,
+    description: (row.description as string) ?? null,
+    detailStatus: (row.detail_status as string) ?? null,
+    detailError: (row.detail_error as string) ?? null,
+    decision: (row.decision as JobRow["decision"]) ?? null,
+    fitScore: (row.fit_score as number) ?? null,
+    confidence: (row.confidence as number) ?? null,
+    evaluation,
+    materials: parseJsonCol(row.materials_json as string | null) as JobRow["materials"],
+    qualify,
+    qualifyReasons: qualify?.reasons ?? null,
+    recommendation: evaluation?.recommendation ?? null,
+    stage3Error: (row.stage3_error as string) ?? null,
+  };
+}
+
 export function mergeDump(stage1Name: string): DumpDetail {
-  const { stage1, stage2, stage3 } = dataPaths();
-  const s1Path = join(stage1, stage1Name);
-  const raw = JSON.parse(readFileSync(s1Path, "utf8"));
-
-  const base: DumpDetail = Array.isArray(raw)
-    ? {
-        dumpedAt: null,
-        parsedAt: null,
-        source: stage1Name,
-        jobs: raw as JobRow[],
-        detailsOk: 0,
-        stage3Ok: 0,
-      }
-    : {
-        dumpedAt: raw.dumpedAt ?? null,
-        parsedAt: raw.parsedAt ?? null,
-        source: raw.source ?? stage1Name,
-        jobs: Array.isArray(raw.jobs) ? raw.jobs : [],
-        detailsOk: 0,
-        stage3Ok: 0,
-      };
-
-  const byId = new Map<string, Record<string, unknown>>();
-  const s2Path = join(stage2, stageNameFor(stage1Name));
-  if (existsSync(s2Path)) {
-    try {
-      const s2 = JSON.parse(readFileSync(s2Path, "utf8"));
-      for (const j of s2.jobs || []) {
-        if (j?.id) byId.set(String(j.id), j);
-      }
-      base.stage2FetchedAt = s2.fetchedAt ?? null;
-    } catch {
-      // ignore
-    }
-  }
-
-  const s3ById = new Map<string, Record<string, unknown>>();
-  const s3Path = join(stage3, stageNameFor(stage1Name));
-  if (existsSync(s3Path)) {
-    try {
-      const s3 = JSON.parse(readFileSync(s3Path, "utf8"));
-      base.stage3CreatedAt = s3.createdAt ?? null;
-      base.stage3Summary = s3.summary ?? null;
-      for (const j of s3.jobs || []) {
-        if (j?.id) s3ById.set(String(j.id), j);
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  base.jobs = base.jobs.map((j) => {
-    const d = byId.get(String(j.id));
-    const s3 = s3ById.get(String(j.id)) as
-      | {
-          decision?: JobRow["decision"];
-          fitScore?: number | null;
-          confidence?: number | null;
-          evaluation?: JobRow["evaluation"];
-          materials?: JobRow["materials"];
-          qualify?: JobRow["qualify"];
-          error?: string;
-        }
-      | undefined;
-
+  const stem = safeBasename(stage1Name);
+  if (!stem) throw new Error("Invalid dump name");
+  const { db: dbPath } = dataPaths();
+  if (!existsSync(dbPath)) throw new Error("Database not found");
+  const db = openAppDb();
+  try {
+    const dump = db
+      .prepare(`SELECT * FROM dumps WHERE basename = ?`)
+      .get(stem) as Record<string, unknown> | undefined;
+    if (!dump) throw new Error("Dump not found");
+    const jobRows = db
+      .prepare(`SELECT * FROM jobs WHERE dump_id = ? ORDER BY job_id`)
+      .all(dump.id) as Array<Record<string, unknown>>;
+    const jobs = jobRows.map(rowToJob);
+    const apply = Number(dump.summary_apply) || 0;
+    const maybe = Number(dump.summary_maybe) || 0;
+    const skip = Number(dump.summary_skip) || 0;
     return {
-      ...j,
-      description: (d?.description as string | null | undefined) ?? null,
-      detailStatus: (d?.status as string | null | undefined) ?? null,
-      detailError: (d?.error as string | null | undefined) ?? null,
-      decision: s3?.decision ?? null,
-      fitScore: s3?.fitScore ?? null,
-      confidence: s3?.confidence ?? null,
-      recommendation: s3?.evaluation?.recommendation ?? null,
-      evaluation: s3?.evaluation ?? null,
-      materials: s3?.materials ?? null,
-      qualify: s3?.qualify ?? null,
-      qualifyReasons: s3?.qualify?.reasons ?? null,
-      stage3Error: s3?.error ?? null,
+      dumpedAt: (dump.dumped_at as string) ?? null,
+      parsedAt: (dump.parsed_at as string) ?? null,
+      source: (dump.source_html as string) || stem,
+      jobs,
+      stage2FetchedAt: (dump.fetched_at as string) ?? null,
+      stage3CreatedAt: (dump.stage3_at as string) ?? null,
+      stage3Summary: { total: apply + maybe + skip, apply, maybe, skip },
+      detailsOk: jobs.filter((j) => j.description).length,
+      stage3Ok: jobs.filter(
+        (j) => j.decision === "apply" || j.decision === "maybe"
+      ).length,
     };
-  });
-
-  base.detailsOk = base.jobs.filter((j) => j.description).length;
-  base.stage3Ok = base.jobs.filter(
-    (j) => j.decision === "apply" || j.decision === "maybe"
-  ).length;
-
-  return base;
+  } finally {
+    db.close();
+  }
 }

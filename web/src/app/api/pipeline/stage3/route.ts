@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { safeJsonName } from "@/lib/dumps";
+import { safeBasename } from "@/lib/dumps";
 import { startStage3 } from "@/lib/pipeline";
 
 export const runtime = "nodejs";
@@ -13,7 +13,7 @@ export async function POST(req: Request) {
       force?: boolean;
       skipGenerate?: boolean;
     };
-    const dumpName = body.dumpName ? safeJsonName(body.dumpName) : null;
+    const dumpName = body.dumpName ? safeBasename(body.dumpName) : null;
     if (!dumpName) {
       return NextResponse.json({ error: "Invalid dumpName" }, { status: 400 });
     }

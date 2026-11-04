@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { CompanyLogo } from "@/components/company-logo";
 import { DecisionBadge } from "@/components/decision-badge";
 import { JobDetailSheet } from "@/components/job-detail-sheet";
 import { PipelineBar } from "@/components/pipeline-bar";
@@ -50,7 +51,11 @@ export function TriageApp() {
   const [decisionFilter, setDecisionFilter] = useState<string>("all");
   const [hasDescription, setHasDescription] = useState(false);
   const [easyApplyOnly, setEasyApplyOnly] = useState(false);
+  const [hasMaterials, setHasMaterials] = useState(false);
+  const [minScore, setMinScore] = useState("");
   const [eligibilityFilter, setEligibilityFilter] = useState<string>("all");
+  const [companyFilter, setCompanyFilter] = useState<string>("all");
+  const [locationFilter, setLocationFilter] = useState<string>("all");
   const [sortKey, setSortKey] = useState<SortKey>("fitScore");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
@@ -97,6 +102,33 @@ export function TriageApp() {
     [detail, selectedId]
   );
 
+  const decisionCounts = useMemo(() => {
+    const jobs = detail?.jobs || [];
+    return {
+      all: jobs.length,
+      apply: jobs.filter((j) => j.decision === "apply").length,
+      maybe: jobs.filter((j) => j.decision === "maybe").length,
+      skip: jobs.filter((j) => j.decision === "skip").length,
+      none: jobs.filter((j) => !j.decision).length,
+    };
+  }, [detail]);
+
+  const companies = useMemo(() => {
+    const set = new Set<string>();
+    for (const j of detail?.jobs || []) {
+      if (j.company) set.add(j.company);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [detail]);
+
+  const locations = useMemo(() => {
+    const set = new Set<string>();
+    for (const j of detail?.jobs || []) {
+      if (j.location) set.add(j.location);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [detail]);
+
   const filtered = useMemo(() => {
     let rows = detail?.jobs ? [...detail.jobs] : [];
     const q = search.trim().toLowerCase();
@@ -123,10 +155,21 @@ export function TriageApp() {
     }
     if (hasDescription) rows = rows.filter((j) => Boolean(j.description));
     if (easyApplyOnly) rows = rows.filter((j) => Boolean(j.easyApply));
+    if (hasMaterials) rows = rows.filter((j) => Boolean(j.materials));
     if (eligibilityFilter !== "all") {
       rows = rows.filter(
         (j) => j.evaluation?.eligibility?.status === eligibilityFilter
       );
+    }
+    if (companyFilter !== "all") {
+      rows = rows.filter((j) => j.company === companyFilter);
+    }
+    if (locationFilter !== "all") {
+      rows = rows.filter((j) => j.location === locationFilter);
+    }
+    const min = Number(minScore);
+    if (Number.isFinite(min) && minScore.trim() !== "") {
+      rows = rows.filter((j) => (j.fitScore ?? -1) >= min);
     }
 
     rows.sort((a, b) => {
@@ -151,7 +194,11 @@ export function TriageApp() {
     decisionFilter,
     hasDescription,
     easyApplyOnly,
+    hasMaterials,
     eligibilityFilter,
+    companyFilter,
+    locationFilter,
+    minScore,
     sortKey,
     sortDir,
   ]);
@@ -208,16 +255,13 @@ export function TriageApp() {
             }
             onValueChange={(v) => setDumpName(v)}
           >
-            <SelectTrigger className="min-w-[260px]">
-              <SelectValue placeholder="Select stage1 dump…" />
+            <SelectTrigger className="min-w-[280px]">
+              <SelectValue placeholder="Select dump…" />
             </SelectTrigger>
             <SelectContent>
               {dumps.map((d) => (
                 <SelectItem key={d.name} value={d.name}>
-                  {d.name}
-                  {d.stage3Apply || d.stage3Maybe
-                    ? ` · A${d.stage3Apply}/M${d.stage3Maybe}`
-                    : ""}
+                  {d.label || d.name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -242,67 +286,127 @@ export function TriageApp() {
         onJobFinished={() => void refreshAll()}
       />
 
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 shadow-sm">
-        <div className="min-w-[200px] flex-1 space-y-1.5">
-          <Label className="text-xs">Search</Label>
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Title, company, recommendation…"
-          />
+      <div className="space-y-3 rounded-xl border bg-card p-3 shadow-sm">
+        <div className="flex flex-wrap gap-2">
+          {(
+            [
+              ["all", `All ${decisionCounts.all}`],
+              ["apply", `Apply ${decisionCounts.apply}`],
+              ["maybe", `Maybe ${decisionCounts.maybe}`],
+              ["skip", `Skip ${decisionCounts.skip}`],
+              ["none", `Uneval ${decisionCounts.none}`],
+            ] as const
+          ).map(([key, label]) => (
+            <Button
+              key={key}
+              size="sm"
+              variant={decisionFilter === key ? "default" : "outline"}
+              onClick={() => setDecisionFilter(key)}
+            >
+              {label}
+            </Button>
+          ))}
         </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs">Decision</Label>
-          <Select
-            value={decisionFilter}
-            onValueChange={(v) => setDecisionFilter(v ?? "all")}
-          >
-            <SelectTrigger className="w-[140px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              <SelectItem value="apply">Apply</SelectItem>
-              <SelectItem value="maybe">Maybe</SelectItem>
-              <SelectItem value="skip">Skip</SelectItem>
-              <SelectItem value="none">Unevaluated</SelectItem>
-            </SelectContent>
-          </Select>
+
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="min-w-[200px] flex-1 space-y-1.5">
+            <Label className="text-xs">Search</Label>
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Title, company, recommendation…"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Min score</Label>
+            <Input
+              className="w-20"
+              inputMode="numeric"
+              value={minScore}
+              onChange={(e) => setMinScore(e.target.value)}
+              placeholder="0"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Eligibility</Label>
+            <Select
+              value={eligibilityFilter}
+              onValueChange={(v) => setEligibilityFilter(v ?? "all")}
+            >
+              <SelectTrigger className="w-[140px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="pass">Pass</SelectItem>
+                <SelectItem value="fail">Fail</SelectItem>
+                <SelectItem value="unknown">Unknown</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Company</Label>
+            <Select
+              value={companyFilter}
+              onValueChange={(v) => setCompanyFilter(v ?? "all")}
+            >
+              <SelectTrigger className="w-[160px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                {companies.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Location</Label>
+            <Select
+              value={locationFilter}
+              onValueChange={(v) => setLocationFilter(v ?? "all")}
+            >
+              <SelectTrigger className="w-[180px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                {locations.map((l) => (
+                  <SelectItem key={l} value={l}>
+                    {l}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <label className="flex items-center gap-2 pb-2 text-sm">
+            <Checkbox
+              checked={hasDescription}
+              onCheckedChange={(v) => setHasDescription(v === true)}
+            />
+            Has description
+          </label>
+          <label className="flex items-center gap-2 pb-2 text-sm">
+            <Checkbox
+              checked={easyApplyOnly}
+              onCheckedChange={(v) => setEasyApplyOnly(v === true)}
+            />
+            Easy Apply
+          </label>
+          <label className="flex items-center gap-2 pb-2 text-sm">
+            <Checkbox
+              checked={hasMaterials}
+              onCheckedChange={(v) => setHasMaterials(v === true)}
+            />
+            Has materials
+          </label>
+          <Badge variant="secondary" className="mb-1">
+            {filtered.length} shown
+          </Badge>
         </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs">Eligibility</Label>
-          <Select
-            value={eligibilityFilter}
-            onValueChange={(v) => setEligibilityFilter(v ?? "all")}
-          >
-            <SelectTrigger className="w-[140px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              <SelectItem value="pass">Pass</SelectItem>
-              <SelectItem value="fail">Fail</SelectItem>
-              <SelectItem value="unknown">Unknown</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <label className="flex items-center gap-2 pb-2 text-sm">
-          <Checkbox
-            checked={hasDescription}
-            onCheckedChange={(v) => setHasDescription(v === true)}
-          />
-          Has description
-        </label>
-        <label className="flex items-center gap-2 pb-2 text-sm">
-          <Checkbox
-            checked={easyApplyOnly}
-            onCheckedChange={(v) => setEasyApplyOnly(v === true)}
-          />
-          Easy Apply
-        </label>
-        <Badge variant="secondary" className="mb-1">
-          {filtered.length} shown
-        </Badge>
       </div>
 
       <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
@@ -369,15 +473,29 @@ export function TriageApp() {
                 <TableCell className="max-w-[280px] truncate font-medium">
                   {job.title || "—"}
                 </TableCell>
-                <TableCell className="max-w-[180px] truncate">
-                  {job.company || "—"}
+                <TableCell>
+                  <div className="flex max-w-[200px] items-center gap-2">
+                    <CompanyLogo src={job.logoUrl} company={job.company} />
+                    <span className="truncate">{job.company || "—"}</span>
+                  </div>
                 </TableCell>
                 <TableCell className="max-w-[160px] truncate text-muted-foreground">
                   {job.location || "—"}
                 </TableCell>
                 <TableCell>
                   {job.evaluation?.eligibility?.status ? (
-                    <Badge variant="outline" className="capitalize">
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "capitalize",
+                        job.evaluation.eligibility.status === "pass" &&
+                          "border-emerald-600/40 bg-emerald-600/15 text-emerald-900",
+                        job.evaluation.eligibility.status === "fail" &&
+                          "border-rose-500/40 bg-rose-500/15 text-rose-900",
+                        job.evaluation.eligibility.status === "unknown" &&
+                          "border-zinc-400/40 bg-zinc-500/10"
+                      )}
+                    >
                       {job.evaluation.eligibility.status}
                     </Badge>
                   ) : (
@@ -400,7 +518,7 @@ export function TriageApp() {
                     ? "Loading…"
                     : dumpName
                       ? "No jobs match filters"
-                      : "Select or parse a dump to begin"}
+                      : "Parse a dump (Stage 1) to begin"}
                 </TableCell>
               </TableRow>
             )}

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Stage 1: parse LinkedIn Jobs list dumps → data/stage1/*.json
+ * Stage 1: parse LinkedIn Jobs list dumps → SQLite (data/job-triage.sqlite)
  *
  * Usage:
  *   node src/stage1/parse-jobs.mjs
@@ -18,32 +18,35 @@ import {
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  openDb,
+  upsertDump,
+  upsertJobCard,
+  basenameFromHtml,
+  nowIso,
+} from "../db.mjs";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const defaultDumpsDir = join(root, "data", "dumps");
-const defaultStage1Dir = join(root, "data", "stage1");
 
 const args = process.argv.slice(2);
 if (args.includes("--help")) {
-  console.log(`Usage: node src/stage1/parse-jobs.mjs [path] [--csv] [--out path]
+  console.log(`Usage: node src/stage1/parse-jobs.mjs [path] [--csv]
 
 Parses LinkedIn Jobs search dumps (Save Page As or bookmarklet).
 
   path   Optional. File or folder to parse.
          Default: data/dumps/ (all .html / .htm files)
 
-Writes JSON to data/stage1/ for the preview SPA and stage-2 fetch.
-With --csv, also writes a CSV alongside.
---out applies when parsing a single file.`);
+Upserts dump + job cards into data/job-triage.sqlite.
+With --csv, also writes a CSV next to the HTML dump.`);
   process.exit(0);
 }
 
 const wantCsv = args.includes("--csv");
-const outArgIdx = args.indexOf("--out");
-const explicitOut =
-  outArgIdx >= 0 ? resolve(args[outArgIdx + 1]).replace(/\.(json|csv)$/i, "") : null;
 const targetArg = args.find((a) => !a.startsWith("--"));
 const targetPath = resolve(targetArg || defaultDumpsDir);
+const db = openDb();
 
 /** Decode common HTML entities in attribute/text snippets. */
 function decodeEntities(s) {
@@ -170,16 +173,12 @@ function collectInputs(path) {
   return [path];
 }
 
-function parseDumpFile(inputPath, { wantCsv, outBaseOverride }) {
+function parseDumpFile(inputPath, { wantCsv }) {
   const html = readFileSync(inputPath, "utf8");
   const parsedAt = new Date();
   const dumpedAt = resolveDumpedAt(html, inputPath, parsedAt);
-
-  const outBase =
-    outBaseOverride ||
-    join(defaultStage1Dir, basename(inputPath).replace(/\.(html?|txt)$/i, ""));
-  const jsonPath = `${outBase}.json`;
-  const csvPath = `${outBase}.csv`;
+  const stem = basenameFromHtml(basename(inputPath));
+  const csvPath = join(dirname(inputPath), `${stem}.csv`);
 
   const idMatches = [
     ...html.matchAll(/componentkey="job-card-component-ref-(\d+)"/g),
@@ -345,12 +344,16 @@ Tip: use bookmarklet.html on the Jobs results page after scrolling.`);
     );
   }
 
-  mkdirSync(dirname(jsonPath), { recursive: true });
-  writeFileSync(
-    jsonPath,
-    JSON.stringify({ ...meta, jobs }, null, 2) + "\n",
-    "utf8"
-  );
+  const dumpId = upsertDump(db, {
+    basename: stem,
+    source_html: basename(inputPath),
+    dumped_at: meta.dumpedAt,
+    parsed_at: meta.parsedAt,
+    updated_at: nowIso(),
+  });
+  for (const j of jobs) {
+    upsertJobCard(db, dumpId, j);
+  }
 
   if (wantCsv) {
     const cols = [
@@ -385,7 +388,7 @@ Tip: use bookmarklet.html on the Jobs results page after scrolling.`);
   }
 
   console.log(`Parsed ${jobs.length} jobs from ${basename(inputPath)}`);
-  console.log(`Wrote ${jsonPath}`);
+  console.log(`Upserted dump ${stem} (id=${dumpId}) into SQLite`);
   if (wantCsv) console.log(`Wrote ${csvPath}`);
   console.log(
     `dumpedAt ${meta.dumpedAt} · logos: ${
@@ -398,22 +401,19 @@ Tip: use bookmarklet.html on the Jobs results page after scrolling.`);
     } · With salary: ${jobs.filter((j) => j.salary).length}`
   );
 
-  return { ok: true, inputPath, jobs, jsonPath };
+  return { ok: true, inputPath, jobs, basename: stem, dumpId };
 }
 
 const inputs = collectInputs(targetPath);
-const singleFile = inputs.length === 1 && !statSync(targetPath).isDirectory();
 let failures = 0;
 
 for (const file of inputs) {
-  const result = parseDumpFile(file, {
-    wantCsv,
-    outBaseOverride: singleFile && explicitOut ? explicitOut : null,
-  });
+  const result = parseDumpFile(file, { wantCsv });
   if (!result.ok) failures += 1;
   if (inputs.length > 1) console.log("");
 }
 
+db.close();
 console.log(`Preview: npm run preview → http://127.0.0.1:4173`);
-console.log(`Details: npm run fetch-details -- data/stage1/<file>.json`);
+console.log(`Details: npm run fetch-details -- <basename>`);
 if (failures > 0) process.exit(2);

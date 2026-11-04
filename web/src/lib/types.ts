@@ -68,6 +68,7 @@ export type JobRow = {
 
 export type DumpSummary = {
   name: string;
+  label?: string;
   mtime: string;
   jobCount: number | null;
   dumpedAt: string | null;

@@ -1,40 +1,17 @@
 /**
  * SQLite cache for Stage 3 evaluations / generations.
+ * Uses the app DB (data/job-triage.sqlite).
  */
 
-import Database from "better-sqlite3";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
 import { createHash } from "node:crypto";
+import { defaultDbPath, openDb } from "../db.mjs";
 
 export function hashText(s) {
   return createHash("sha256").update(String(s || ""), "utf8").digest("hex");
 }
 
-export function openCache(dbPath) {
-  mkdirSync(dirname(dbPath), { recursive: true });
-  const db = new Database(dbPath);
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS cache (
-      cache_key TEXT PRIMARY KEY,
-      kind TEXT NOT NULL,
-      job_id TEXT NOT NULL,
-      payload TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS runs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      source_stage1 TEXT,
-      started_at TEXT NOT NULL,
-      finished_at TEXT,
-      meta TEXT
-    );
-    CREATE TABLE IF NOT EXISTS prompt_versions (
-      name TEXT PRIMARY KEY,
-      version TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-  `);
+export function openCache(dbPath = defaultDbPath()) {
+  const db = openDb(dbPath);
 
   const getStmt = db.prepare(`SELECT payload FROM cache WHERE cache_key = ?`);
   const setStmt = db.prepare(`

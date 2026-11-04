@@ -1,9 +1,9 @@
 "use client";
 
+import { CompanyLogo } from "@/components/company-logo";
 import { DecisionBadge } from "@/components/decision-badge";
 import { TagList } from "@/components/tag-list";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -16,7 +16,19 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { JobRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { ExternalLink } from "lucide-react";
+
+function LinkedInIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden
+      className={className}
+    >
+      <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z" />
+    </svg>
+  );
+}
 
 function Section({
   title,
@@ -35,6 +47,12 @@ function Section({
   );
 }
 
+const ELIGIBILITY_STYLES = {
+  pass: "border-emerald-600/40 bg-emerald-600/15 text-emerald-900",
+  fail: "border-rose-500/40 bg-rose-500/15 text-rose-900",
+  unknown: "border-zinc-400/40 bg-zinc-500/10 text-zinc-800",
+} as const;
+
 export function JobDetailSheet({
   job,
   open,
@@ -46,30 +64,34 @@ export function JobDetailSheet({
 }) {
   const evaln = job?.evaluation;
   const materials = job?.materials;
+  const elig = evaln?.eligibility?.status;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="w-full gap-0 p-0 sm:max-w-xl"
+        className="flex h-full max-h-dvh w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-xl"
         showCloseButton
       >
         {job ? (
           <>
-            <SheetHeader className="border-b">
-              <div className="flex items-start justify-between gap-3 pr-8">
-                <div className="min-w-0 space-y-1">
-                  <SheetTitle className="text-lg leading-snug">
-                    {job.title || "Untitled role"}
-                  </SheetTitle>
+            <SheetHeader className="shrink-0 border-b">
+              <div className="flex items-start gap-3 pr-8">
+                <CompanyLogo src={job.logoUrl} company={job.company} className="size-10" />
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <SheetTitle className="text-lg leading-snug">
+                      {job.title || "Untitled role"}
+                    </SheetTitle>
+                    <DecisionBadge decision={job.decision ?? null} />
+                  </div>
                   <SheetDescription className="text-sm">
                     {[job.company, job.location].filter(Boolean).join(" · ") ||
                       "No company / location"}
                   </SheetDescription>
                 </div>
-                <DecisionBadge decision={job.decision ?? null} />
               </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
                 {job.fitScore != null ? (
                   <Badge variant="secondary">Score {job.fitScore}</Badge>
                 ) : null}
@@ -78,9 +100,12 @@ export function JobDetailSheet({
                     Conf {(job.confidence * 100).toFixed(0)}%
                   </Badge>
                 ) : null}
-                {evaln?.eligibility?.status ? (
-                  <Badge variant="outline">
-                    Eligibility {evaln.eligibility.status}
+                {elig ? (
+                  <Badge
+                    variant="outline"
+                    className={cn("capitalize", ELIGIBILITY_STYLES[elig])}
+                  >
+                    Eligibility {elig}
                   </Badge>
                 ) : null}
                 {job.easyApply ? (
@@ -91,17 +116,17 @@ export function JobDetailSheet({
                     href={job.url}
                     target="_blank"
                     rel="noreferrer"
-                    className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+                    className="inline-flex h-7 items-center gap-1.5 rounded-lg bg-[#0A66C2] px-2.5 text-xs font-medium text-white hover:bg-[#004182]"
                   >
+                    <LinkedInIcon className="size-3.5" />
                     Open on LinkedIn
-                    <ExternalLink data-icon="inline-end" />
                   </a>
                 ) : null}
               </div>
             </SheetHeader>
 
-            <ScrollArea className="flex-1">
-              <div className="space-y-5 p-4">
+            <ScrollArea className="min-h-0 flex-1">
+              <div className="space-y-5 p-4 pb-10">
                 <Tabs defaultValue="evaluation">
                   <TabsList className="w-full">
                     <TabsTrigger value="evaluation" className="flex-1">
@@ -118,7 +143,7 @@ export function JobDetailSheet({
                   <TabsContent value="evaluation" className="mt-4 space-y-5">
                     {(evaln?.recommendation || job.recommendation) && (
                       <Section title="Recommendation">
-                        <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                        <p className="rounded-md border border-sky-500/20 bg-sky-50/80 p-3 text-sm leading-relaxed whitespace-pre-wrap">
                           {evaln?.recommendation || job.recommendation}
                         </p>
                       </Section>
@@ -126,13 +151,20 @@ export function JobDetailSheet({
 
                     {evaln?.eligibility && (
                       <Section title="Eligibility">
-                        <p className="text-sm leading-relaxed">
-                          {evaln.eligibility.locationNotes}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          International hiring:{" "}
-                          {evaln.eligibility.internationalHiring}
-                        </p>
+                        <div
+                          className={cn(
+                            "rounded-md border p-3",
+                            ELIGIBILITY_STYLES[evaln.eligibility.status]
+                          )}
+                        >
+                          <p className="text-sm leading-relaxed">
+                            {evaln.eligibility.locationNotes}
+                          </p>
+                          <p className="mt-1 text-xs opacity-80">
+                            International hiring:{" "}
+                            {evaln.eligibility.internationalHiring}
+                          </p>
+                        </div>
                       </Section>
                     )}
 
@@ -260,7 +292,7 @@ export function JobDetailSheet({
                         </p>
                       ) : (
                         <p className="text-sm text-muted-foreground">
-                          No description — run fetch details.
+                          No description — run Stage 2 fetch.
                         </p>
                       )}
                     </Section>

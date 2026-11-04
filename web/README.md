@@ -2,6 +2,8 @@
 
 Next.js App Router + shadcn. Requires **Node 22+** (repo `.nvmrc`).
 
+Reads dumps/jobs from `../data/job-triage.sqlite`. Stage CLIs still live under `../src/stage*`.
+
 ```bash
 nvm use
 npm install
@@ -10,5 +12,3 @@ npm run dev
 ```
 
 From repo root: `npm run preview`.
-
-API routes spawn `src/stage{1,2,3}` CLIs against `../data`. Repo-root `.env` is loaded for Anthropic.

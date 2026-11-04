@@ -1,20 +1,20 @@
 # Job triage
 
-Personal offline helper: **list → detail → Claude intelligence → manual apply**.
+Personal offline helper: **list HTML → SQLite jobs → Claude intelligence → manual apply**.
 
 ## Flow
 
-1. **Stage 1 — list cards**  
-   Dump Jobs search HTML into `data/dumps/`, parse to `data/stage1/*.json`.
-2. **Stage 2 — descriptions**  
-   Guest Playwright fetch → `data/stage2/*.json` (+ HTML under `data/dumps/details/`).
+1. **Stage 1 — Parse list HTML**  
+   Save Jobs search HTML into `data/dumps/`. Parse upserts job cards into `data/job-triage.sqlite`.
+2. **Stage 2 — Fetch descriptions**  
+   Guest Playwright fetch updates job rows (+ HTML under `data/dumps/details/`).
 3. **Stage 3 — Claude evaluate / generate**  
-   Merge + hard qualify, then Anthropic Claude for fit scores and (for apply/maybe) cover letter / outreach. Results in `data/stage3/*.json` (SQLite cache in `data/stage3/job-triage.sqlite`).
+   Qualify + Anthropic Claude; decisions / materials written to the same SQLite DB (Claude responses also cached there).
 4. **Preview + you apply**  
-   Next.js + shadcn UI; run parse / fetch / Stage 3 from the page, scan evaluations, open LinkedIn yourself.
+   Next.js UI reads SQLite; run stages from the page; open LinkedIn yourself.
 
 ```bash
-# Node 22+ recommended (see .nvmrc) for the web UI
+# Node 22+ recommended (see .nvmrc)
 nvm use
 npm install
 npm install --prefix web
@@ -25,12 +25,12 @@ npm run preview
 # → http://127.0.0.1:4173
 
 # Or CLI:
-npm run parse
-npm run fetch-details -- data/stage1/<file>.json
-npm run stage3 -- data/stage1/<file>.json --limit 3
+npm run parse -- data/dumps/<file>.html
+npm run fetch-details -- <basename> --limit 5
+npm run stage3 -- <basename> --limit 3
 ```
 
-`--csv` on stage 1 also writes CSV for Sheets (optional).
+`<basename>` is the dump stem, e.g. `linkedin-jobs-2026-11-03T00-01-37-705Z` (no `.json`).
 
 ## Profile
 
@@ -42,21 +42,20 @@ Edit before trusting Stage 3:
 | [`data/profile/canonical.json`](data/profile/canonical.json) | Structured facts + `discrepancies[]` |
 | [`data/profile/preferences.md`](data/profile/preferences.md) | Remote/Algeria prefs, avoid-lists |
 
-Resolve discrepancies (employment “Present” vs actual end date; “5+ years” framing) before mass-running evaluate. Bump `profileVersion` in `canonical.json` after edits so the cache refreshes.
+Bump `profileVersion` in `canonical.json` after edits so the Claude cache refreshes.
 
 ## Layout
 
 ```
-data/dumps/           # list + details HTML
-data/stage1/          # list JSON
-data/stage2/          # detail JSON
-data/stage3/          # AI JSON + sqlite cache
-data/profile/         # CV / prefs / canonical
+data/dumps/              # list HTML + details/{id}.html
+data/job-triage.sqlite   # dumps, jobs, Claude cache
+data/profile/            # CV / prefs / canonical
+src/db.mjs               # shared SQLite schema + helpers
 src/stage1|stage2|stage3/
-web/                  # Next.js + shadcn preview UI
+web/                     # Next.js + shadcn preview UI
 ```
 
-Personal dumps, stage JSON, `.env`, and `data/*.pdf` are gitignored.
+Personal dumps, SQLite, `.env`, and `data/*.pdf` are gitignored.
 
 ## Stage 3 notes
 

@@ -1,35 +1,41 @@
 #!/usr/bin/env node
 /**
  * Stage 2: guest fetch of LinkedIn job detail pages (headed Playwright).
+ * Reads/writes job rows in data/job-triage.sqlite; saves HTML under data/dumps/details/.
  *
  * Usage:
- *   node src/stage2/fetch-details.mjs data/stage1/jobs.json
- *   node src/stage2/fetch-details.mjs data/stage1/jobs.json --limit 2
- *   node src/stage2/fetch-details.mjs data/stage1/jobs.json --proxy http://127.0.0.1:7890
- *
- * Uses a clean ephemeral browser context (not your Chrome profile).
- * On captcha / missing description: pauses for Enter after you solve it manually.
+ *   node src/stage2/fetch-details.mjs <basename>
+ *   node src/stage2/fetch-details.mjs <basename> --limit 2
+ *   node src/stage2/fetch-details.mjs <basename> --reparse-only
  */
 
-import {
-  readFileSync,
-  writeFileSync,
-  mkdirSync,
-  existsSync,
-} from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 import { chromium } from "playwright";
 import { parseDetailHtml, looksLikeChallenge } from "./parse-detail.mjs";
+import {
+  openDb,
+  basenameFromArg,
+  getDumpByBasename,
+  listJobsForDump,
+  updateJobDetail,
+  upsertDump,
+  relativeDetailPath,
+  nowIso,
+  jobRowToApi,
+} from "../db.mjs";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const detailsHtmlDir = join(root, "data", "dumps", "details");
-const stage2Dir = join(root, "data", "stage2");
 
 const args = process.argv.slice(2);
 if (args.length === 0 || args.includes("--help")) {
-  console.log(`Usage: node src/stage2/fetch-details.mjs <stage1.json> [options]
+  console.log(`Usage: node src/stage2/fetch-details.mjs <basename> [options]
+
+  basename   Dump stem (e.g. linkedin-jobs-2026-11-03T00-01-37-705Z)
+             Also accepts a path ending in that stem (.json/.html ignored).
 
 Options:
   --limit N       Only process first N pending jobs
@@ -37,13 +43,14 @@ Options:
   --proxy URL     HTTP(S) proxy (else HTTP_PROXY / HTTPS_PROXY env)
   --headed        Force headed (default)
   --headless      Headless (harder to solve captchas)
-  --reparse-only  Re-parse saved data/dumps/details/{id}.html into stage-2 JSON (no browser)
+  --reparse-only  Re-parse saved data/dumps/details/{id}.html into SQLite (no browser)
 
 Never log into the Playwright window with your LinkedIn account.`);
   process.exit(args.includes("--help") ? 0 : 1);
 }
 
-const stage1Path = resolve(args.find((a) => !a.startsWith("--")));
+const dumpArg = args.find((a) => !a.startsWith("--"));
+const basename = basenameFromArg(dumpArg);
 const limitIdx = args.indexOf("--limit");
 const limit = limitIdx >= 0 ? Number(args[limitIdx + 1]) : Infinity;
 const delayIdx = args.indexOf("--delay");
@@ -73,44 +80,6 @@ function waitForEnter(message) {
   });
 }
 
-function loadStage1(path) {
-  const raw = JSON.parse(readFileSync(path, "utf8"));
-  const jobs = Array.isArray(raw) ? raw : raw.jobs;
-  if (!Array.isArray(jobs)) throw new Error("Stage-1 JSON missing jobs[]");
-  return { meta: Array.isArray(raw) ? {} : raw, jobs };
-}
-
-function stage2PathFor(stage1File) {
-  const base = basename(stage1File).replace(/\.json$/i, "");
-  return join(stage2Dir, `${base}.json`);
-}
-
-function loadStage2(path) {
-  if (!existsSync(path)) {
-    return {
-      fetchedAt: null,
-      sourceStage1: basename(stage1Path),
-      jobs: [],
-    };
-  }
-  return JSON.parse(readFileSync(path, "utf8"));
-}
-
-function saveStage2(path, doc) {
-  mkdirSync(dirnameSafe(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(doc, null, 2) + "\n", "utf8");
-}
-
-function dirnameSafe(p) {
-  return resolve(p, "..");
-}
-
-function upsertJob(doc, record) {
-  const i = doc.jobs.findIndex((j) => j.id === record.id);
-  if (i >= 0) doc.jobs[i] = { ...doc.jobs[i], ...record };
-  else doc.jobs.push(record);
-}
-
 async function extractFromPage(page) {
   const html = await page.content();
   return { html, parsed: parseDetailHtml(html) };
@@ -122,7 +91,6 @@ async function waitForJobContent(page) {
   } catch {
     // continue
   }
-  // Guest / logged-in variants
   const selectors = [
     ".show-more-less-html__markup",
     ".description__text",
@@ -155,105 +123,115 @@ function parseProxy(url) {
   }
 }
 
-const { jobs: stage1Jobs } = loadStage1(stage1Path);
-const outPath = stage2PathFor(stage1Path);
-const stage2 = loadStage2(outPath);
-stage2.sourceStage1 = basename(stage1Path);
+function saveDetail(db, dumpId, record) {
+  updateJobDetail(db, dumpId, record.id, {
+    status: record.status,
+    description: record.description,
+    error: record.error,
+    htmlPath: record.htmlPath,
+    fetchedAt: record.fetchedAt,
+    title: record.title,
+    company: record.company,
+  });
+}
 
-const doneIds = new Set(
-  stage2.jobs.filter((j) => j.status === "ok" && j.description).map((j) => j.id)
-);
+const db = openDb();
+const dump = getDumpByBasename(db, basename);
+if (!dump) {
+  console.error(`Unknown dump basename: ${basename}. Run stage1 parse first.`);
+  db.close();
+  process.exit(1);
+}
 
+const cardJobs = listJobsForDump(db, dump.id).map(jobRowToApi);
 mkdirSync(detailsHtmlDir, { recursive: true });
-mkdirSync(stage2Dir, { recursive: true });
 
 if (reparseOnly) {
-  let targets = stage1Jobs.filter((j) => j.id);
+  let targets = cardJobs.filter((j) => j.id);
   if (Number.isFinite(limit)) targets = targets.slice(0, limit);
   let ok = 0;
   let missing = 0;
   for (const job of targets) {
-    const htmlPath = join(detailsHtmlDir, `${job.id}.html`);
-    if (!existsSync(htmlPath)) {
-      upsertJob(stage2, {
+    const absHtml = join(detailsHtmlDir, `${job.id}.html`);
+    const rel = relativeDetailPath(job.id);
+    if (!existsSync(absHtml)) {
+      saveDetail(db, dump.id, {
         id: job.id,
-        url: job.url,
-        title: job.title || null,
-        company: job.company || null,
         status: "missing_html",
         description: null,
         error: "No saved HTML in data/dumps/details",
         htmlPath: null,
-        fetchedAt: new Date().toISOString(),
+        fetchedAt: nowIso(),
+        title: job.title,
+        company: job.company,
       });
       missing += 1;
       continue;
     }
-    const html = readFileSync(htmlPath, "utf8");
+    const html = readFileSync(absHtml, "utf8");
     const parsed = parseDetailHtml(html);
     if (parsed.description) {
-      upsertJob(stage2, {
+      saveDetail(db, dump.id, {
         id: job.id,
-        url: job.url,
-        title: parsed.title || job.title || null,
-        company: job.company || parsed.company || null,
         status: "ok",
         description: parsed.description,
         error: null,
-        htmlPath,
-        fetchedAt: new Date().toISOString(),
+        htmlPath: rel,
+        fetchedAt: nowIso(),
+        title: parsed.title || job.title,
+        company: job.company || parsed.company,
       });
       ok += 1;
       console.log(`✓ ${job.id} (${parsed.description.length} chars)`);
     } else {
-      upsertJob(stage2, {
+      saveDetail(db, dump.id, {
         id: job.id,
-        url: job.url,
-        title: job.title || parsed.title || null,
-        company: job.company || parsed.company || null,
         status: "missing_description",
         description: null,
         error: looksLikeChallenge(html)
           ? "Login wall or challenge page (no job description)"
           : "Could not extract description from saved HTML",
-        htmlPath,
-        fetchedAt: new Date().toISOString(),
+        htmlPath: rel,
+        fetchedAt: nowIso(),
+        title: job.title || parsed.title,
+        company: job.company || parsed.company,
       });
       missing += 1;
       console.log(`✗ ${job.id} — no description`);
     }
   }
-  stage2.fetchedAt = new Date().toISOString();
-  saveStage2(outPath, stage2);
-  console.log(`\nReparsed: ${ok} ok · ${missing} missing → ${outPath}`);
+  upsertDump(db, { basename, fetched_at: nowIso() });
+  db.close();
+  console.log(`\nReparsed: ${ok} ok · ${missing} missing → dump ${basename}`);
   process.exit(0);
 }
 
-let pending = stage1Jobs.filter((j) => j.id && j.url && !doneIds.has(j.id));
+const doneIds = new Set(
+  cardJobs.filter((j) => j.detailStatus === "ok" && j.description).map((j) => j.id)
+);
+let pending = cardJobs.filter((j) => j.id && j.url && !doneIds.has(j.id));
 if (Number.isFinite(limit)) pending = pending.slice(0, limit);
 
 console.log(
-  `Stage-1 jobs: ${stage1Jobs.length} · already ok: ${doneIds.size} · to fetch: ${pending.length}`
+  `Dump ${basename}: ${cardJobs.length} jobs · already ok: ${doneIds.size} · to fetch: ${pending.length}`
 );
 if (proxyUrl) console.log(`Proxy: ${proxyUrl}`);
 if (!pending.length) {
-  console.log(`Nothing to do. Stage-2 file: ${outPath}`);
+  console.log(`Nothing to do.`);
+  db.close();
   process.exit(0);
 }
 
-const launchOpts = {
+const browser = await chromium.launch({
   headless,
   proxy: parseProxy(proxyUrl),
-};
-
-const browser = await chromium.launch(launchOpts);
+});
 const context = await browser.newContext({
   viewport: { width: 1280, height: 900 },
   userAgent:
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
   locale: "en-GB",
 });
-// Explicitly no storageState — ephemeral guest session
 const page = await context.newPage();
 
 let index = 0;
@@ -268,10 +246,10 @@ try {
     let description = null;
     let title = job.title || null;
     let company = job.company || null;
-    let htmlPath = join(detailsHtmlDir, `${job.id}.html`);
+    const absHtml = join(detailsHtmlDir, `${job.id}.html`);
+    const rel = relativeDetailPath(job.id);
 
     try {
-      // Warm guest jar lightly once per process (first job)
       if (index === 1) {
         try {
           await page.goto("https://www.linkedin.com/jobs/", {
@@ -280,12 +258,11 @@ try {
           });
           await sleep(1500);
         } catch {
-          // continue to job URL anyway
+          // continue
         }
       }
 
-      const viewUrl = `https://www.linkedin.com/jobs/view/${job.id}/`;
-      await page.goto(viewUrl, {
+      await page.goto(`https://www.linkedin.com/jobs/view/${job.id}/`, {
         waitUntil: "domcontentloaded",
         timeout: 60_000,
       });
@@ -314,10 +291,8 @@ try {
         ({ html, parsed } = await extractFromPage(page));
       }
 
-      writeFileSync(htmlPath, html, "utf8");
+      writeFileSync(absHtml, html, "utf8");
 
-      // Prefer extracted description; challenge heuristics must not discard a real JD
-      // (LinkedIn HTML often contains "recaptcha" config strings on successful pages).
       if (parsed.description) {
         description = parsed.description;
         title = parsed.title || title;
@@ -335,19 +310,17 @@ try {
       console.error("Fetch error:", error);
     }
 
-    upsertJob(stage2, {
+    saveDetail(db, dump.id, {
       id: job.id,
-      url: job.url,
-      title,
-      company,
       status,
       description,
       error,
-      htmlPath: existsSync(htmlPath) ? htmlPath : null,
-      fetchedAt: new Date().toISOString(),
+      htmlPath: existsSync(absHtml) ? rel : null,
+      fetchedAt: nowIso(),
+      title,
+      company,
     });
-    stage2.fetchedAt = new Date().toISOString();
-    saveStage2(outPath, stage2);
+    upsertDump(db, { basename, fetched_at: nowIso() });
     console.log(`→ ${status}${description ? ` (${description.length} chars)` : ""}`);
 
     if (index < pending.length) {
@@ -362,5 +335,7 @@ try {
   await browser.close();
 }
 
-const ok = stage2.jobs.filter((j) => j.status === "ok").length;
-console.log(`\nDone. ${ok}/${stage2.jobs.length} ok → ${outPath}`);
+const refreshed = listJobsForDump(db, dump.id);
+const ok = refreshed.filter((j) => j.detail_status === "ok").length;
+db.close();
+console.log(`\nDone. ${ok}/${refreshed.length} ok → dump ${basename}`);

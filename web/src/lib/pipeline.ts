@@ -178,14 +178,11 @@ export function startParse(htmlName: string): PipelineJob {
 }
 
 export function startFetch(dumpName: string, limit?: number): PipelineJob {
-  const { stage1 } = dataPaths();
-  const path = join(stage1, dumpName);
-  if (!existsSync(path)) {
-    throw Object.assign(new Error(`Stage1 dump not found: ${dumpName}`), {
-      status: 404,
-    });
+  const stem = dumpName.replace(/\.json$/i, "");
+  if (!stem) {
+    throw Object.assign(new Error("Invalid dump basename"), { status: 400 });
   }
-  const args = [join("src", "stage2", "fetch-details.mjs"), path];
+  const args = [join("src", "stage2", "fetch-details.mjs"), stem];
   if (limit != null && Number.isFinite(limit) && limit > 0) {
     args.push("--limit", String(Math.floor(limit)));
   }
@@ -196,14 +193,11 @@ export function startStage3(
   dumpName: string,
   opts: { limit?: number; force?: boolean; skipGenerate?: boolean } = {}
 ): PipelineJob {
-  const { stage1 } = dataPaths();
-  const path = join(stage1, dumpName);
-  if (!existsSync(path)) {
-    throw Object.assign(new Error(`Stage1 dump not found: ${dumpName}`), {
-      status: 404,
-    });
+  const stem = dumpName.replace(/\.json$/i, "");
+  if (!stem) {
+    throw Object.assign(new Error("Invalid dump basename"), { status: 400 });
   }
-  const args = [join("src", "stage3", "run.mjs"), path];
+  const args = [join("src", "stage3", "run.mjs"), stem];
   if (opts.limit != null && Number.isFinite(opts.limit) && opts.limit > 0) {
     args.push("--limit", String(Math.floor(opts.limit)));
   }

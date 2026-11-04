@@ -10,6 +10,10 @@ data/stage2/**
 data/stage3/**
 !data/stage3/.gitkeep
 
+# App database (dumps, jobs, Claude cache)
+data/job-triage.sqlite
+data/job-triage.sqlite-*
+
 # Personal CV / secrets
 data/*.pdf
 .env

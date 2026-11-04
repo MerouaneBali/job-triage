@@ -9,7 +9,7 @@ if (existsSync(repoEnv)) {
 }
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["dotenv"],
+  serverExternalPackages: ["dotenv", "better-sqlite3"],
   turbopack: {
     root: __dirname,
   },

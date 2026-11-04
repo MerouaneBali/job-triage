@@ -13,9 +13,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
 import type { HtmlDump, PipelineJob } from "@/lib/types";
-import { Loader2 } from "lucide-react";
+import {
+  Bot,
+  FileSearch,
+  Loader2,
+  Sparkles,
+} from "lucide-react";
 
 type Props = {
   dumpName: string | null;
@@ -59,7 +63,6 @@ export function PipelineBar({ dumpName, onJobFinished }: Props) {
           phase?: string;
           exitCode?: number;
           message?: string;
-          job?: PipelineJob;
         };
         if (data.type === "log" && data.line) {
           setLogs((prev) => [...prev, data.line!]);
@@ -93,7 +96,7 @@ export function PipelineBar({ dumpName, onJobFinished }: Props) {
           toast.error(data.message || "Pipeline error");
         }
       } catch {
-        // ignore malformed
+        // ignore
       }
     };
     es.onerror = () => {
@@ -135,10 +138,16 @@ export function PipelineBar({ dumpName, onJobFinished }: Props) {
 
   return (
     <div className="space-y-3 rounded-xl border bg-card p-4 shadow-sm">
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="space-y-1.5">
-          <Label className="text-xs">Parse HTML dump</Label>
-          <div className="flex gap-2">
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="space-y-2 rounded-lg border border-dashed p-3">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <FileSearch className="size-4 text-sky-700" />
+            Stage 1 — Parse list HTML
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Turn a saved Jobs search page into job cards in SQLite.
+          </p>
+          <div className="flex flex-wrap gap-2">
             <Select
               key={htmlDumps.map((d) => d.name).join("|") || "empty"}
               value={
@@ -148,7 +157,7 @@ export function PipelineBar({ dumpName, onJobFinished }: Props) {
               }
               onValueChange={(v) => setHtmlName(v ?? "")}
             >
-              <SelectTrigger className="min-w-[220px]">
+              <SelectTrigger className="min-w-[180px] flex-1">
                 <SelectValue placeholder="Select HTML…" />
               </SelectTrigger>
               <SelectContent>
@@ -162,19 +171,24 @@ export function PipelineBar({ dumpName, onJobFinished }: Props) {
             <Button
               disabled={busy || !htmlName}
               onClick={() =>
-                start("/api/pipeline/parse", { htmlName }, "parse")
+                start("/api/pipeline/parse", { htmlName }, "Stage 1 parse")
               }
             >
+              <FileSearch data-icon="inline-start" />
               Parse
             </Button>
           </div>
         </div>
 
-        <Separator orientation="vertical" className="hidden h-10 sm:block" />
-
-        <div className="space-y-1.5">
-          <Label className="text-xs">Fetch details (headed Chromium)</Label>
-          <div className="flex gap-2">
+        <div className="space-y-2 rounded-lg border border-dashed p-3">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <Sparkles className="size-4 text-amber-700" />
+            Stage 2 — Fetch descriptions
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Opens headed Chromium to pull guest job details into the DB.
+          </p>
+          <div className="flex flex-wrap gap-2">
             <Input
               className="w-20"
               inputMode="numeric"
@@ -193,19 +207,24 @@ export function PipelineBar({ dumpName, onJobFinished }: Props) {
                     dumpName,
                     limit: Number(fetchLimit) || undefined,
                   },
-                  "fetch"
+                  "Stage 2 fetch"
                 )
               }
             >
+              <Sparkles data-icon="inline-start" />
               Fetch
             </Button>
           </div>
         </div>
 
-        <Separator orientation="vertical" className="hidden h-10 sm:block" />
-
-        <div className="space-y-1.5">
-          <Label className="text-xs">Stage 3 (Claude)</Label>
+        <div className="space-y-2 rounded-lg border border-dashed p-3">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <Bot className="size-4 text-emerald-700" />
+            Stage 3 — Claude evaluate
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Score fit, decide apply/maybe/skip, optionally draft outreach.
+          </p>
           <div className="flex flex-wrap items-center gap-2">
             <Input
               className="w-20"
@@ -240,22 +259,23 @@ export function PipelineBar({ dumpName, onJobFinished }: Props) {
                     force,
                     skipGenerate,
                   },
-                  "stage3"
+                  "Stage 3"
                 )
               }
             >
-              Run Stage 3
+              <Bot data-icon="inline-start" />
+              Run
             </Button>
           </div>
         </div>
-
-        {busy ? (
-          <div className="ml-auto flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" />
-            {job?.phase || "running"}…
-          </div>
-        ) : null}
       </div>
+
+      {busy ? (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" />
+          {job?.phase || "running"}…
+        </div>
+      ) : null}
 
       {(logs.length > 0 || job) && (
         <div className="rounded-lg border bg-zinc-950 p-3 font-mono text-[11px] leading-relaxed text-zinc-100">

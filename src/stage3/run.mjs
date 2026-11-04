@@ -1,45 +1,52 @@
 #!/usr/bin/env node
 /**
- * Stage 3 CLI: merge → qualify → evaluate (Claude) → generate (Claude).
+ * Stage 3 CLI: load dump from SQLite → qualify → evaluate (Claude) → generate.
  *
- *   npm run stage3 -- data/stage1/foo.json
- *   npm run stage3 -- data/stage1/foo.json --limit 3 --skip-generate
- *   npm run stage3 -- data/stage1/foo.json --qualify-only
+ *   npm run stage3 -- <basename>
+ *   npm run stage3 -- <basename> --limit 3 --skip-generate
+ *   npm run stage3 -- <basename> --qualify-only
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { readFileSync, existsSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { config as loadEnv } from "dotenv";
 
-import { mergeStageFiles } from "./merge.mjs";
+import { mergeFromDb } from "./merge.mjs";
 import { qualifyAll } from "./qualify.mjs";
 import { openCache } from "./cache.mjs";
 import { createClaudeClient } from "./claude.mjs";
 import { evaluateJob } from "./evaluate.mjs";
 import { generateForJob } from "./generate.mjs";
+import {
+  basenameFromArg,
+  openDb,
+  defaultDbPath,
+  updateJobTriage,
+  upsertDump,
+  refreshDumpSummaries,
+  nowIso,
+} from "../db.mjs";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 loadEnv({ path: join(root, ".env") });
 
 const args = process.argv.slice(2);
 if (args.length === 0 || args.includes("--help")) {
-  console.log(`Usage: node src/stage3/run.mjs <stage1.json> [options]
+  console.log(`Usage: node src/stage3/run.mjs <basename> [options]
+
+  basename   Dump stem in SQLite (e.g. linkedin-jobs-2026-11-03T00-01-37-705Z)
 
 Options:
   --limit N          Evaluate at most N jobs that pass qualify
   --skip-generate    Do not call Claude for cover letters / outreach
-  --qualify-only     Merge + qualify only (no API)
-  --force            Ignore SQLite cache
-  --stage2 PATH      Override stage-2 JSON path
+  --qualify-only     Qualify only (no API); writes skip/pending into DB
+  --force            Ignore SQLite Claude cache
 `);
   process.exit(args.includes("--help") ? 0 : 1);
 }
 
-const stage1Path = resolve(args.find((a) => !a.startsWith("--")));
-const stage2Idx = args.indexOf("--stage2");
-const stage2Path =
-  stage2Idx >= 0 ? resolve(args[stage2Idx + 1]) : undefined;
+const basename = basenameFromArg(args.find((a) => !a.startsWith("--")));
 const limitIdx = args.indexOf("--limit");
 const limit = limitIdx >= 0 ? Number(args[limitIdx + 1]) : Infinity;
 const skipGenerate = args.includes("--skip-generate");
@@ -47,11 +54,8 @@ const qualifyOnly = args.includes("--qualify-only");
 const force = args.includes("--force");
 
 const profileDir = join(root, "data", "profile");
-const stage3Dir = join(root, "data", "stage3");
 const canonicalPath = join(profileDir, "canonical.json");
 const prefsPath = join(profileDir, "preferences.md");
-const dbPath = join(stage3Dir, "job-triage.sqlite");
-const outPath = join(stage3Dir, basename(stage1Path));
 
 if (!existsSync(canonicalPath)) {
   console.error(`Missing ${canonicalPath}`);
@@ -68,25 +72,39 @@ const prefs = {
   blockAgencies: false,
 };
 
-console.log(`Merge ${basename(stage1Path)} …`);
-const merged = mergeStageFiles(stage1Path, stage2Path);
+const db = openDb(defaultDbPath());
+
+console.log(`Load dump ${basename} …`);
+let merged;
+try {
+  merged = mergeFromDb(basename, db);
+} catch (e) {
+  console.error(e.message || e);
+  db.close();
+  process.exit(1);
+}
+
+const dumpId = merged.dump.id;
 const qualified = qualifyAll(merged.jobs, prefs);
 
 const failCount = qualified.filter((j) => j.qualify.eligibility === "fail")
   .length;
 const passCount = qualified.length - failCount;
 console.log(
-  `Merged ${qualified.length} jobs · qualify pass ${passCount} · fail ${failCount}`
+  `Loaded ${qualified.length} jobs · qualify pass ${passCount} · fail ${failCount}`
 );
-
-mkdirSync(stage3Dir, { recursive: true });
 
 /** @type {object[]} */
 const results = [];
 
+function persistResult(row) {
+  updateJobTriage(db, dumpId, row.id, row);
+  results.push(row);
+}
+
 for (const job of qualified) {
   if (job.qualify.eligibility === "fail") {
-    results.push({
+    persistResult({
       id: job.id,
       title: job.title,
       company: job.company,
@@ -98,50 +116,47 @@ for (const job of qualified) {
       qualify: job.qualify,
       evaluation: null,
       materials: null,
+      error: null,
       skipReason: "qualify_fail",
     });
   }
 }
 
 if (qualifyOnly) {
-  const doc = {
-    stage: 3,
-    createdAt: new Date().toISOString(),
-    sourceStage1: merged.sourceStage1,
-    sourceStage2: merged.sourceStage2,
-    profileVersion: canonical.profileVersion,
-    jobs: results.concat(
-      qualified
-        .filter((j) => j.qualify.eligibility === "pass")
-        .map((j) => ({
-          id: j.id,
-          title: j.title,
-          company: j.company,
-          location: j.location,
-          url: j.url,
-          decision: null,
-          fitScore: null,
-          qualify: j.qualify,
-          evaluation: null,
-          materials: null,
-          pendingEvaluate: true,
-        }))
-    ),
-  };
-  writeFileSync(outPath, JSON.stringify(doc, null, 2) + "\n");
-  console.log(`Wrote ${outPath} (qualify-only)`);
+  // Failures already persisted as skip above. For pass jobs, only refresh qualify_json
+  // without wiping existing evaluations / materials.
+  const updQualify = db.prepare(`
+    UPDATE jobs SET qualify_json = @qualify_json
+    WHERE dump_id = @dump_id AND job_id = @job_id
+  `);
+  for (const j of qualified.filter((x) => x.qualify.eligibility === "pass")) {
+    updQualify.run({
+      dump_id: dumpId,
+      job_id: String(j.id),
+      qualify_json: JSON.stringify(j.qualify),
+    });
+  }
+  upsertDump(db, {
+    basename,
+    stage3_at: nowIso(),
+    profile_version: canonical.profileVersion,
+  });
+  refreshDumpSummaries(db, dumpId);
+  db.close();
+  console.log(`Wrote qualify-only results to SQLite dump ${basename}`);
   process.exit(0);
 }
 
 let toEval = qualified.filter((j) => j.qualify.eligibility === "pass");
 if (Number.isFinite(limit)) toEval = toEval.slice(0, limit);
 
-const cache = openCache(dbPath);
+const cache = openCache(defaultDbPath());
 let claude;
 try {
   claude = createClaudeClient(process.env);
 } catch (e) {
   cache.close();
+  db.close();
   console.error(e.message);
   process.exit(1);
 }
@@ -182,7 +197,7 @@ try {
         });
       }
 
-      results.push({
+      persistResult({
         id: job.id,
         title: job.title,
         company: job.company,
@@ -196,10 +211,11 @@ try {
         qualify: job.qualify,
         evaluation,
         materials,
+        error: null,
       });
     } catch (e) {
       console.error(`  ERROR ${job.id}:`, e.message || e);
-      results.push({
+      persistResult({
         id: job.id,
         title: job.title,
         company: job.company,
@@ -219,34 +235,24 @@ try {
   cache.close();
 }
 
-// Sort: apply/maybe by score desc, then skips
-const rank = { apply: 0, maybe: 1, skip: 2 };
-results.sort((a, b) => {
-  const da = rank[a.decision] ?? 9;
-  const db = rank[b.decision] ?? 9;
-  if (da !== db) return da - db;
-  return (b.fitScore || 0) - (a.fitScore || 0);
-});
-
-const doc = {
-  stage: 3,
-  createdAt: new Date().toISOString(),
-  sourceStage1: merged.sourceStage1,
-  sourceStage2: merged.sourceStage2,
-  profileVersion: canonical.profileVersion,
+upsertDump(db, {
+  basename,
+  stage3_at: nowIso(),
+  profile_version: canonical.profileVersion,
   model: claude.model,
-  jobs: results,
-  summary: {
-    total: results.length,
-    apply: results.filter((j) => j.decision === "apply").length,
-    maybe: results.filter((j) => j.decision === "maybe").length,
-    skip: results.filter((j) => j.decision === "skip").length,
-  },
+});
+refreshDumpSummaries(db, dumpId);
+
+const summary = {
+  total: results.length,
+  apply: results.filter((j) => j.decision === "apply").length,
+  maybe: results.filter((j) => j.decision === "maybe").length,
+  skip: results.filter((j) => j.decision === "skip").length,
 };
 
-writeFileSync(outPath, JSON.stringify(doc, null, 2) + "\n");
-console.log(`\nWrote ${outPath}`);
+db.close();
+console.log(`\nWrote Stage 3 results to SQLite dump ${basename}`);
 console.log(
-  `Summary: apply ${doc.summary.apply} · maybe ${doc.summary.maybe} · skip ${doc.summary.skip}`
+  `Summary: apply ${summary.apply} · maybe ${summary.maybe} · skip ${summary.skip}`
 );
 console.log(`Preview: npm run preview → http://127.0.0.1:4173`);

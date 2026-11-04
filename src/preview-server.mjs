@@ -17,6 +17,7 @@ const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const previewDir = join(root, "src", "preview");
 const stage1Dir = join(root, "data", "stage1");
 const stage2Dir = join(root, "data", "stage2");
+const stage3Dir = join(root, "data", "stage3");
 const host = "127.0.0.1";
 const port = Number(process.env.PORT) || 4173;
 
@@ -56,6 +57,8 @@ function listDumps() {
       let dumpedAt = null;
       let source = null;
       let detailsOk = 0;
+      let stage3Apply = 0;
+      let stage3Maybe = 0;
       try {
         const raw = JSON.parse(readFileSync(full, "utf8"));
         if (Array.isArray(raw)) {
@@ -72,6 +75,14 @@ function listDumps() {
             ? s2.jobs.filter((j) => j.status === "ok" && j.description).length
             : 0;
         }
+        const s3Path = join(stage3Dir, stage2NameFor(name));
+        if (existsSync(s3Path)) {
+          const s3 = JSON.parse(readFileSync(s3Path, "utf8"));
+          for (const j of s3.jobs || []) {
+            if (j.decision === "apply") stage3Apply += 1;
+            if (j.decision === "maybe") stage3Maybe += 1;
+          }
+        }
       } catch {
         // still list the file
       }
@@ -82,6 +93,8 @@ function listDumps() {
         dumpedAt,
         source,
         detailsOk,
+        stage3Apply,
+        stage3Maybe,
       };
     })
     .sort((a, b) => (a.mtime < b.mtime ? 1 : -1));
@@ -121,17 +134,43 @@ function mergeStage1WithStage2(stage1Name) {
     }
   }
 
+  const s3ById = new Map();
+  const s3Path = join(stage3Dir, stage2NameFor(stage1Name));
+  if (existsSync(s3Path)) {
+    try {
+      const s3 = JSON.parse(readFileSync(s3Path, "utf8"));
+      base.stage3CreatedAt = s3.createdAt ?? null;
+      base.stage3Summary = s3.summary ?? null;
+      for (const j of s3.jobs || []) {
+        if (j && j.id) s3ById.set(String(j.id), j);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   base.jobs = base.jobs.map((j) => {
     const d = byId.get(String(j.id));
-    if (!d) return { ...j, description: null, detailStatus: null };
-    return {
+    const s3 = s3ById.get(String(j.id));
+    const row = {
       ...j,
-      description: d.description ?? null,
-      detailStatus: d.status ?? null,
-      detailError: d.error ?? null,
+      description: d?.description ?? null,
+      detailStatus: d?.status ?? null,
+      detailError: d?.error ?? null,
+      decision: s3?.decision ?? null,
+      fitScore: s3?.fitScore ?? null,
+      confidence: s3?.confidence ?? null,
+      recommendation: s3?.evaluation?.recommendation ?? null,
+      materials: s3?.materials ?? null,
+      qualifyReasons: s3?.qualify?.reasons ?? null,
+      stage3Error: s3?.error ?? null,
     };
+    return row;
   });
   base.detailsOk = base.jobs.filter((j) => j.description).length;
+  base.stage3Ok = base.jobs.filter(
+    (j) => j.decision === "apply" || j.decision === "maybe"
+  ).length;
   return base;
 }
 
@@ -210,4 +249,5 @@ server.listen(port, host, () => {
   console.log(`Job triage preview → http://${host}:${port}`);
   console.log(`Stage-1 JSON: ${stage1Dir}`);
   console.log(`Stage-2 JSON: ${stage2Dir}`);
+  console.log(`Stage-3 JSON: ${stage3Dir}`);
 });

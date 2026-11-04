@@ -70,6 +70,36 @@ function descriptionCell(j) {
   )}</pre></details>`;
 }
 
+function decisionPill(decision) {
+  if (!decision) return `<span class="pill off">—</span>`;
+  const cls =
+    decision === "apply"
+      ? "pill yes"
+      : decision === "maybe"
+        ? "pill maybe"
+        : "pill off";
+  return `<span class="${cls}">${esc(decision)}</span>`;
+}
+
+function aiNotesCell(j) {
+  const parts = [];
+  if (j.recommendation) parts.push(j.recommendation);
+  if (j.qualifyReasons?.length) {
+    parts.push("Qualify: " + j.qualifyReasons.join(", "));
+  }
+  if (j.materials?.outreachMessage) {
+    parts.push("Outreach:\n" + j.materials.outreachMessage);
+  }
+  if (j.materials?.coverLetter) {
+    parts.push("Cover letter:\n" + j.materials.coverLetter);
+  }
+  if (!parts.length) return `<span class="muted">—</span>`;
+  const summary = (j.recommendation || parts[0]).slice(0, 120);
+  return `<details class="desc"><summary>${esc(summary)}${
+    summary.length >= 120 ? "…" : ""
+  }</summary><pre>${esc(parts.join("\n\n"))}</pre></details>`;
+}
+
 /** Normalize legacy array JSON or { jobs, …meta } payloads. */
 function normalizeDump(raw, fallbackName) {
   if (Array.isArray(raw)) {
@@ -107,6 +137,7 @@ const el = {
   easyOnly: document.getElementById("easyOnly"),
   salaryOnly: document.getElementById("salaryOnly"),
   hasDesc: document.getElementById("hasDesc"),
+  applyMaybe: document.getElementById("applyMaybe"),
   selectAll: document.getElementById("selectAll"),
   openSelected: document.getElementById("openSelected"),
   clearSel: document.getElementById("clearSel"),
@@ -119,8 +150,15 @@ function filteredJobs() {
     if (el.easyOnly.checked && !j.easyApply) return false;
     if (el.salaryOnly.checked && !j.salary) return false;
     if (el.hasDesc.checked && !j.description) return false;
+    if (
+      el.applyMaybe.checked &&
+      j.decision !== "apply" &&
+      j.decision !== "maybe"
+    ) {
+      return false;
+    }
     if (!q) return true;
-    const hay = `${j.title || ""} ${j.company || ""} ${j.description || ""}`.toLowerCase();
+    const hay = `${j.title || ""} ${j.company || ""} ${j.description || ""} ${j.recommendation || ""}`.toLowerCase();
     return hay.includes(q);
   });
 }
@@ -145,9 +183,12 @@ function renderMeta() {
   }
   const d = state.data;
   const withDesc = d.jobs.filter((j) => j.description).length;
+  const apply = d.jobs.filter((j) => j.decision === "apply").length;
+  const maybe = d.jobs.filter((j) => j.decision === "maybe").length;
   el.meta.textContent = [
     `${d.jobs.length} jobs`,
     `${withDesc} with description`,
+    `apply ${apply} / maybe ${maybe}`,
     d.dumpedAt ? `dumped ${d.dumpedAt}` : null,
     d.source ? `source ${d.source}` : null,
     state.currentName ? `file ${state.currentName}` : null,
@@ -167,6 +208,8 @@ function renderTable() {
       return (
         `<tr class="${sel.trim()}" data-id="${esc(j.id)}">` +
         `<td class="check"><input type="checkbox" data-row${checked} /></td>` +
+        `<td>${decisionPill(j.decision)}</td>` +
+        `<td>${j.fitScore == null ? "—" : esc(String(j.fitScore))}</td>` +
         `<td class="title">${esc(j.title || "—")}</td>` +
         `<td>${companyCell(j)}</td>` +
         `<td>${esc(j.location || "—")}</td>` +
@@ -177,12 +220,8 @@ function renderTable() {
             ? '<span class="pill">Yes</span>'
             : '<span class="pill off">No</span>'
         }</td>` +
-        `<td>${
-          j.verified
-            ? '<span class="pill">Yes</span>'
-            : '<span class="pill off">No</span>'
-        }</td>` +
         `<td class="desc-cell">${descriptionCell(j)}</td>` +
+        `<td class="desc-cell">${aiNotesCell(j)}</td>` +
         `<td><a href="${esc(j.url)}" target="_blank" rel="noopener">Open</a></td>` +
         `</tr>`
       );
@@ -209,7 +248,7 @@ function fillDumpSelect() {
   el.dumpSelect.innerHTML = state.dumps
     .map(
       (d) =>
-        `<option value="${esc(d.name)}">${esc(d.name)} (${d.jobCount ?? "?"} jobs, ${d.detailsOk ?? 0} desc)</option>`
+        `<option value="${esc(d.name)}">${esc(d.name)} (${d.jobCount ?? "?"} jobs, ${d.detailsOk ?? 0} desc, apply ${d.stage3Apply ?? 0})</option>`
     )
     .join("");
   if (!state.dumps.length) {
@@ -307,7 +346,7 @@ el.refreshDumps.addEventListener("click", () => {
   });
 });
 
-for (const node of [el.q, el.easyOnly, el.salaryOnly, el.hasDesc]) {
+for (const node of [el.q, el.easyOnly, el.salaryOnly, el.hasDesc, el.applyMaybe]) {
   node.addEventListener("input", renderTable);
   node.addEventListener("change", renderTable);
 }

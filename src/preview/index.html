@@ -27,13 +27,14 @@
       <label><input type="checkbox" id="easyOnly" /> Easy Apply only</label>
       <label><input type="checkbox" id="salaryOnly" /> Has salary</label>
       <label><input type="checkbox" id="hasDesc" /> Has description</label>
+      <label><input type="checkbox" id="applyMaybe" /> Apply / maybe only</label>
       <button type="button" id="openSelected" disabled>Open selected</button>
       <button type="button" class="ghost" id="clearSel">Clear selection</button>
     </div>
 
     <p class="hint">
-      Posted times refresh from absolute timestamps when you load a dump. Descriptions
-      come from stage-2 fetch. Opening many tabs may need popups allowed for this origin.
+      Stage-2 adds descriptions; Stage-3 (Claude) adds decision / score / materials.
+      Opening many tabs may need popups allowed for this origin.
     </p>
 
     <div class="wrap">
@@ -43,14 +44,16 @@
             <th class="check">
               <input type="checkbox" id="selectAll" title="Select all visible" />
             </th>
+            <th>Decision</th>
+            <th>Score</th>
             <th>Title</th>
             <th>Company</th>
             <th>Location</th>
             <th>Salary</th>
             <th>Posted</th>
             <th>Easy Apply</th>
-            <th>Verified</th>
             <th>Description</th>
+            <th>AI notes</th>
             <th>Link</th>
           </tr>
         </thead>

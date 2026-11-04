@@ -1,0 +1,107 @@
+{
+  "profileVersion": "2026-11-04.1",
+  "name": "Bali Merouane",
+  "email": "merouane@merodev.net",
+  "headline": "Full-Stack Engineer · Product Developer · UI/UX Designer",
+  "location": {
+    "city": "Constantine",
+    "country": "Algeria",
+    "remotePreference": "remote_international"
+  },
+  "languages": ["English", "Arabic"],
+  "summary": "Full-stack engineer combining product/UI design with React/Next.js/TypeScript, Node, and AWS. Experience across e-commerce, SaaS, telecom white-label platforms, and internal tools.",
+  "yearsExperienceClaim": {
+    "cvText": "5+ years",
+    "earliestRoleStart": "2021-09",
+    "note": "Computed span from earliest listed role (Sep 2021) vs CV marketing phrase '5+ years' — see discrepancies."
+  },
+  "skills": {
+    "frontend": ["React", "Next.js", "Vue 3", "TypeScript", "JavaScript", "Tailwind CSS", "SCSS", "Liquid"],
+    "backendCloud": ["Node.js", "Express", "REST APIs", "GraphQL", "AWS Lambda", "API Gateway", "CDK", "S3"],
+    "productDesign": ["Figma", "UI/UX design", "design systems", "interaction design", "Blender"],
+    "commerceAnalytics": ["Shopify", "Stripe", "checkout flows", "PostHog", "GTM/UA4/GAds"],
+    "other": ["Git", "Jest", "Cypress", "Postman", "Zod", "React Native", "Three.js", "React Three Fiber", "GSAP", "MongoDB", "BigQuery", "DBT"]
+  },
+  "experience": [
+    {
+      "company": "Likes Telecom / EZ Telecom",
+      "title": "Full-Stack Engineer — Product Development & UI/UX Design",
+      "start": "2025-01",
+      "end": null,
+      "endLabelOnCv": "Present",
+      "workMode": "Remote",
+      "workLocale": "Spain",
+      "highlights": [
+        "B2B white-label telecom: consumer sites, brand templates, partner dashboards, customer portals, APIs",
+        "EZ Telecom storefront with Stripe checkout and plan configurator",
+        "Next.js white-label template + Amplify deployments",
+        "Gyga portal (Next.js) replacing Flutter web",
+        "AWS Lambda APIs and AI-assisted editing tooling"
+      ]
+    },
+    {
+      "company": "Pawsitive Dog Food",
+      "title": "Full-Stack Engineer — Product Development & UI/UX Design",
+      "start": "2022-05",
+      "end": "2024-12",
+      "workMode": "Remote",
+      "workLocale": "UK",
+      "highlights": [
+        "Shopify storefront and subscription portal",
+        "Commerce/subscription/payment/analytics integrations",
+        "Monorepo consolidation; ~8k–15k monthly users; reported engagement and deploy-time improvements"
+      ]
+    },
+    {
+      "company": "Bravo Food",
+      "title": "Full-Stack App Developer — Product Development & UI/UX Design",
+      "start": "2021-09",
+      "end": "2022-02",
+      "workMode": "Client project",
+      "workLocale": null,
+      "highlights": [
+        "Customer web + React Native delivery app + admin dashboard",
+        "Node.js/Express/MongoDB shared APIs"
+      ]
+    }
+  ],
+  "projects": [
+    "Personal Developer Portfolio (3D / interactive; award-winning)",
+    "Easy Forms API",
+    "Speed Terminal"
+  ],
+  "awards": [
+    "CSS Design Awards — Website of the Day",
+    "CSS Design Awards — Website of the Month nominee (Top 5)",
+    "CSS Design Awards — Website of the Year 2025 nominee (Top 10)",
+    "GSAP Site of the Day",
+    "Awwwards Honorable Mention",
+    "Muzli Pick"
+  ],
+  "preferencesPath": "data/profile/preferences.md",
+  "cvPath": "data/profile/cv.md",
+  "discrepancies": [
+    {
+      "id": "employment-current-status",
+      "field": "experience[0].end",
+      "cvSays": "January 2025 – Present (Likes Telecom / EZ Telecom)",
+      "otherClaim": "User/context has mentioned leaving around October 2026 — not verified on CV text",
+      "resolution": "unresolved",
+      "action": "Update CV and canonical.json end date when confirmed; do not invent an end date in generated materials until resolved."
+    },
+    {
+      "id": "years-experience-framing",
+      "field": "yearsExperienceClaim",
+      "cvSays": "5+ years of experience",
+      "otherClaim": "Earliest listed role starts September 2021 (~4+ years by calendar span depending on 'today')",
+      "resolution": "unresolved",
+      "action": "Pick one framing for applications (e.g. '4+ years professional' vs keep '5+'); evaluators must not invent a third number."
+    }
+  ],
+  "unknowns": [
+    "Exact salary expectations",
+    "Visa/sponsorship needs for specific countries",
+    "Willingness to relocate",
+    "Current notice period / availability date (depends on employment status resolution)"
+  ]
+}

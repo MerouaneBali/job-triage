@@ -7,10 +7,16 @@
   "scripts": {
     "parse": "node src/stage1/parse-jobs.mjs",
     "fetch-details": "node src/stage2/fetch-details.mjs",
+    "stage3": "node src/stage3/run.mjs",
     "preview": "node src/preview-server.mjs",
     "postinstall": "npx playwright install chromium"
   },
   "dependencies": {
-    "playwright": "^1.49.0"
+    "@anthropic-ai/sdk": "^1.4.0",
+    "better-sqlite3": "^11.7.0",
+    "dotenv": "^18.0.9",
+    "pdf-parse": "^1.1.1",
+    "playwright": "^1.49.0",
+    "zod": "^4.6.7"
   }
 }

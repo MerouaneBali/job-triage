@@ -1,65 +1,71 @@
 # Job triage
 
-Personal offline helper to **list → detail → triage** LinkedIn jobs before you apply.
+Personal offline helper: **list → detail → Claude intelligence → manual apply**.
 
 ## Flow
 
 1. **Stage 1 — list cards**  
-   Dump the Jobs search page (Save Page As or bookmarklet) into `data/dumps/`, parse to JSON.
+   Dump Jobs search HTML into `data/dumps/`, parse to `data/stage1/*.json`.
 2. **Stage 2 — descriptions**  
-   Guest Playwright browser opens each job URL (not your Chrome profile), saves HTML, extracts description. Pauses if captcha/manual help needed.
-3. **Preview**  
-   Local SPA merges stage-1 + stage-2 for filtering and bulk-open.
+   Guest Playwright fetch → `data/stage2/*.json` (+ HTML under `data/dumps/details/`).
+3. **Stage 3 — Claude evaluate / generate**  
+   Merge + hard qualify, then Anthropic Claude for fit scores and (for apply/maybe) cover letter / outreach. Results in `data/stage3/*.json` (SQLite cache in `data/stage3/job-triage.sqlite`).
+4. **Preview + you apply**  
+   Local SPA; you open URLs / send messages yourself.
 
 ```bash
 npm install
+cp .env.example .env   # set ANTHROPIC_API_KEY
 
-# Stage 1: parse list dumps (default folder data/dumps/)
+# Stage 1
 npm run parse
-# or: node src/stage1/parse-jobs.mjs data/dumps/one.html
-# --csv also writes a CSV for Excel/Sheets (optional; preview uses JSON)
 
-# Stage 2: fetch descriptions for a stage-1 file
-npm run fetch-details -- data/stage1/linkedin-jobs-….json --limit 2
-# full run:
-npm run fetch-details -- data/stage1/linkedin-jobs-….json
-# re-parse already-saved detail HTML (no browser):
-npm run fetch-details -- data/stage1/….json --reparse-only
-# optional proxy for later IP rotation:
-npm run fetch-details -- data/stage1/….json --proxy http://127.0.0.1:7890
+# Stage 2
+npm run fetch-details -- data/stage1/<file>.json
+# or re-parse saved HTML:
+npm run fetch-details -- data/stage1/<file>.json --reparse-only
 
-# Preview UI
+# Stage 3 (Claude)
+npm run stage3 -- data/stage1/<file>.json --limit 3
+npm run stage3 -- data/stage1/<file>.json --skip-generate
+npm run stage3 -- data/stage1/<file>.json --qualify-only   # no API
+
+# Preview
 npm run preview
 # → http://127.0.0.1:4173
 ```
 
+`--csv` on stage 1 also writes CSV for Sheets (optional; preview uses JSON).
+
+## Profile
+
+Edit before trusting Stage 3:
+
+| File | Purpose |
+|---|---|
+| [`data/profile/cv.md`](data/profile/cv.md) | Extracted CV text |
+| [`data/profile/canonical.json`](data/profile/canonical.json) | Structured facts + `discrepancies[]` |
+| [`data/profile/preferences.md`](data/profile/preferences.md) | Remote/Algeria prefs, avoid-lists |
+
+Resolve discrepancies (employment “Present” vs actual end date; “5+ years” framing) before mass-running evaluate. Bump `profileVersion` in `canonical.json` after edits so the cache refreshes.
+
 ## Layout
 
 ```
-data/dumps/           # list HTML dumps (+ details/ for stage-2 HTML)
+data/dumps/           # list + details HTML
 data/stage1/          # list JSON
-data/stage2/          # detail JSON (same basename as stage-1)
-src/stage1/           # parse-jobs.mjs
-src/stage2/           # fetch-details.mjs, parse-detail.mjs
-src/preview/          # triage SPA
-src/preview-server.mjs
-bookmarklet.html
+data/stage2/          # detail JSON
+data/stage3/          # AI JSON + sqlite cache
+data/profile/         # CV / prefs / canonical
+src/stage1|stage2|stage3/
+src/preview/
 ```
 
-`data/**` dumps and JSON are gitignored (personal).
+Personal dumps, stage JSON, `.env`, and `data/*.pdf` are gitignored.
 
-## Stage 2 notes
+## Stage 3 notes
 
-- **Headed Chromium** by default so you can solve captchas. Do **not** log into LinkedIn in that window.
-- Sessions are **ephemeral** (no profile / storageState); closed when the script exits.
-- **Resume:** re-run skips jobs already `status: "ok"` with a description.
-- **`--delay`** base wait between jobs (default 4000ms + jitter).
-- **`--proxy` / `HTTP_PROXY`:** for VPN/proxy rotation later.
-
-## Bookmarklet (optional)
-
-Open `bookmarklet.html`, drag **Dump LinkedIn Jobs HTML** to the bookmarks bar. Downloads go to your browser Downloads folder — move files into `data/dumps/`. Unique timestamped names; Save Page As can overwrite by tab title.
-
-## Posted times (stage 1)
-
-Relative phrases (`7 hours ago`) become absolute `postedAt` using dump time (bookmarklet marker → file mtime → now). Preview recomputes “ago” when you load a dump.
+- Uses **Anthropic Claude** (`ANTHROPIC_API_KEY`, optional `ANTHROPIC_MODEL`).
+- Hard `qualify` skips clearance / obvious geo mismatches without spending tokens.
+- Evaluations cached by job id + description hash + profile version + prompt version.
+- Never auto-applies or messages recruiters.

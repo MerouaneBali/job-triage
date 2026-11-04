@@ -8,7 +8,8 @@
     "parse": "node src/stage1/parse-jobs.mjs",
     "fetch-details": "node src/stage2/fetch-details.mjs",
     "stage3": "node src/stage3/run.mjs",
-    "preview": "node src/preview-server.mjs",
+    "preview": "node -e \"if(Number(process.versions.node.split('.')[0])<22){console.error('Job triage web UI needs Node 22+. Run: nvm use');process.exit(1)}\" && npm run dev --prefix web",
+    "dev:web": "npm run preview",
     "postinstall": "npx playwright install chromium"
   },
   "dependencies": {

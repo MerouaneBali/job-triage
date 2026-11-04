@@ -11,31 +11,26 @@ Personal offline helper: **list → detail → Claude intelligence → manual ap
 3. **Stage 3 — Claude evaluate / generate**  
    Merge + hard qualify, then Anthropic Claude for fit scores and (for apply/maybe) cover letter / outreach. Results in `data/stage3/*.json` (SQLite cache in `data/stage3/job-triage.sqlite`).
 4. **Preview + you apply**  
-   Local SPA; you open URLs / send messages yourself.
+   Next.js + shadcn UI; run parse / fetch / Stage 3 from the page, scan evaluations, open LinkedIn yourself.
 
 ```bash
+# Node 22+ recommended (see .nvmrc) for the web UI
+nvm use
 npm install
+npm install --prefix web
 cp .env.example .env   # set ANTHROPIC_API_KEY
 
-# Stage 1
-npm run parse
-
-# Stage 2
-npm run fetch-details -- data/stage1/<file>.json
-# or re-parse saved HTML:
-npm run fetch-details -- data/stage1/<file>.json --reparse-only
-
-# Stage 3 (Claude)
-npm run stage3 -- data/stage1/<file>.json --limit 3
-npm run stage3 -- data/stage1/<file>.json --skip-generate
-npm run stage3 -- data/stage1/<file>.json --qualify-only   # no API
-
-# Preview
+# Preview UI (also drives the pipeline)
 npm run preview
 # → http://127.0.0.1:4173
+
+# Or CLI:
+npm run parse
+npm run fetch-details -- data/stage1/<file>.json
+npm run stage3 -- data/stage1/<file>.json --limit 3
 ```
 
-`--csv` on stage 1 also writes CSV for Sheets (optional; preview uses JSON).
+`--csv` on stage 1 also writes CSV for Sheets (optional).
 
 ## Profile
 
@@ -58,7 +53,7 @@ data/stage2/          # detail JSON
 data/stage3/          # AI JSON + sqlite cache
 data/profile/         # CV / prefs / canonical
 src/stage1|stage2|stage3/
-src/preview/
+web/                  # Next.js + shadcn preview UI
 ```
 
 Personal dumps, stage JSON, `.env`, and `data/*.pdf` are gitignored.

@@ -17,6 +17,13 @@ data/*.pdf
 
 # Dependencies
 node_modules/
+web/node_modules/
+web/.next/
+web/out/
+
+# Next
+web/.env.local
+web/.env*.local
 
 # OS / editor
 .DS_Store

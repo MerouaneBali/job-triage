@@ -353,18 +353,17 @@ export function TriageApp() {
         ))}
       </div>
 
-      {view === "pipeline" ? (
-        <PipelineBar
-          dumps={dumps}
-          dumpName={dumpName}
-          onDumpChange={setDumpName}
-          onJobFinished={() => void refreshAll()}
-          onDumpReady={(name) => {
-            setDumpName(name);
-            void refreshAll();
-          }}
-        />
-      ) : null}
+      <PipelineBar
+        dumps={dumps}
+        dumpName={dumpName}
+        onDumpChange={setDumpName}
+        showStages={view === "pipeline"}
+        onJobFinished={() => void refreshAll()}
+        onDumpReady={(name) => {
+          setDumpName(name);
+          void refreshAll();
+        }}
+      />
 
       {view === "apply" ? (
         <ApplyQueue

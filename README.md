@@ -37,8 +37,15 @@ npm run stage3 -- <basename> --limit 3
 
 - **Laptop:** develop and test; open preview from your phone on Wi‑Fi or Tailscale.
 - **Pi (production):** always-on UI + DB + stages behind Tailscale (no modem port-forward).
+- **Install as app (PWA):** Chrome needs HTTPS. Plain `http://…:4173` only offers a shortcut. On the host:
 
-Full steps: **[`docs/pi-setup.md`](docs/pi-setup.md)** (Node 22, Tailscale, Playwright, systemd, update workflow).
+```bash
+# First time: enable Serve when Tailscale prints an admin link, then:
+tailscale serve --bg 4173
+# Phone → https://<magicdns>/  (no :4173) → Install app
+```
+
+Full steps: **[`docs/pi-setup.md`](docs/pi-setup.md)** (Node 22, Tailscale Serve/PWA, Playwright, systemd, update workflow).
 
 ## Profile
 

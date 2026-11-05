@@ -107,13 +107,14 @@ sudo systemctl status job-triage
 
 1. Phone on Tailscale.
 2. For day-to-day browsing: `http://<magicdns>:4173` works fine.
-3. **To install as a home-screen app (PWA)** Chrome needs **HTTPS**. Plain `http://…ts.net:4173` only allows “Create shortcut” (opens Chrome). Enable Tailscale Serve once per machine:
+3. **Install as a home-screen app (PWA)** — Chrome’s **Install app** needs **HTTPS**. On plain `http://…ts.net:4173` you only get **Create shortcut** (opens Chrome). Enable Tailscale Serve on the machine that runs the UI:
 
 ```bash
-# First time: open the link Tailscale prints (enable Serve on your tailnet), then:
+# First time: if Tailscale prints an admin URL, open it to enable Serve on your tailnet.
 tailscale serve --bg 4173
 tailscale serve status
-# Phone: https://<magicdns>/   (no :4173 — Serve terminates TLS on 443)
+# Phone Chrome → https://<magicdns>/   (no :4173 — TLS on 443)
+# Menu → Install app / Add to Home screen
 ```
 
 Do **not** port-forward 4173 on your 5G modem. Tailscale is enough.

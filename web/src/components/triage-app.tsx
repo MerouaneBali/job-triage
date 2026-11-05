@@ -34,11 +34,12 @@ import {
 } from "@/components/dump-health";
 import { ALL_DUMPS, type DumpDetail, type DumpSummary, type JobRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { Briefcase, ListFilter, RefreshCw, Workflow } from "lucide-react";
+import { Briefcase, LayoutDashboard, ListFilter, RefreshCw, Workflow } from "lucide-react";
 import { toast } from "sonner";
+import { Dashboard } from "@/components/dashboard";
 
 type SortKey = "fitScore" | "postedAt" | "company" | "title" | "decision";
-type AppView = "apply" | "triage" | "pipeline";
+type AppView = "apply" | "triage" | "pipeline" | "dashboard";
 
 function decisionRank(d: JobRow["decision"]) {
   if (d === "apply") return 0;
@@ -315,7 +316,7 @@ export function TriageApp() {
             from your phone — you still apply manually.
           </p>
         </div>
-        {view !== "pipeline" ? (
+        {view !== "pipeline" && view !== "dashboard" ? (
           <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
             {dumpsLoading ? (
               <Skeleton className="h-11 w-full min-w-0 flex-1 sm:min-w-[280px]" />
@@ -397,7 +398,7 @@ export function TriageApp() {
         ) : null}
       </header>
 
-      {view !== "pipeline" ? (
+      {view !== "pipeline" && view !== "dashboard" ? (
         bootLoading && !meta ? (
           <Skeleton className="h-3 w-64 max-w-full" />
         ) : meta ? (
@@ -412,6 +413,7 @@ export function TriageApp() {
             ["apply", "Apply", Briefcase],
             ["triage", "Triage", ListFilter],
             ["pipeline", "Pipeline", Workflow],
+            ["dashboard", "Dashboard", LayoutDashboard],
           ] as const
         ).map(([key, label, Icon]) => (
           <Button
@@ -431,17 +433,19 @@ export function TriageApp() {
         ))}
       </div>
 
-      <PipelineBar
-        dumps={dumps}
-        dumpName={dumpName === ALL_DUMPS ? dumps[0]?.name ?? null : dumpName}
-        onDumpChange={setDumpName}
-        showStages={view === "pipeline"}
-        onJobFinished={() => void refreshAll()}
-        onDumpReady={(name) => {
-          setDumpName(name);
-          void refreshAll();
-        }}
-      />
+      {view !== "dashboard" ? (
+        <PipelineBar
+          dumps={dumps}
+          dumpName={dumpName === ALL_DUMPS ? dumps[0]?.name ?? null : dumpName}
+          onDumpChange={setDumpName}
+          showStages={view === "pipeline"}
+          onJobFinished={() => void refreshAll()}
+          onDumpReady={(name) => {
+            setDumpName(name);
+            void refreshAll();
+          }}
+        />
+      ) : null}
 
       {view === "apply" ? (
         <ApplyQueue
@@ -776,14 +780,17 @@ export function TriageApp() {
         onOpenChange={setSheetOpen}
       />
 
+      {view === "dashboard" ? <Dashboard /> : null}
+
       {/* Mobile bottom nav */}
       <nav className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 backdrop-blur md:hidden">
-        <div className="mx-auto grid max-w-[1600px] grid-cols-3 gap-1 p-2">
+        <div className="mx-auto grid max-w-[1600px] grid-cols-4 gap-1 p-2">
           {(
             [
               ["apply", "Apply", Briefcase],
               ["triage", "Triage", ListFilter],
               ["pipeline", "Pipeline", Workflow],
+              ["dashboard", "Stats", LayoutDashboard],
             ] as const
           ).map(([key, label, Icon]) => (
             <button

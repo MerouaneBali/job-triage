@@ -34,7 +34,7 @@ function ensureJobsTrackColumns(db: Database.Database) {
   `);
 }
 
-function openAppDb() {
+export function openAppDb() {
   const path = dataPaths().db;
   const db = new Database(path, { readonly: false, fileMustExist: false });
   try {

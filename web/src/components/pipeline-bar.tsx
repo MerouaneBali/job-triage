@@ -223,7 +223,9 @@ export function PipelineBar({
           value={
             dumpName && dumps.some((d) => d.name === dumpName) ? dumpName : null
           }
-          onValueChange={(v) => onDumpChange(v)}
+          onValueChange={(v) => {
+            if (v) onDumpChange(v);
+          }}
         >
           <SelectTrigger className="min-h-11 w-full min-w-0 sm:max-w-md">
             <SelectValue placeholder="Parsed dump…">

@@ -1,5 +1,6 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { PwaRegister } from "@/components/pwa-register";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
@@ -16,7 +17,27 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Job triage",
-  description: "Local LinkedIn job triage — parse, fetch, evaluate, apply manually",
+  description:
+    "Local LinkedIn job triage — parse, fetch, evaluate, apply manually",
+  applicationName: "Job triage",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Job triage",
+  },
+  formatDetection: {
+    telephone: false,
+  },
+  icons: {
+    apple: "/apple-touch-icon.png",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#111111",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
@@ -32,6 +53,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col bg-background text-foreground">
         <TooltipProvider>
           {children}
+          <PwaRegister />
           <Toaster richColors closeButton position="bottom-right" />
         </TooltipProvider>
       </body>

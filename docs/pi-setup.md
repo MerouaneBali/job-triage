@@ -106,8 +106,15 @@ sudo systemctl status job-triage
 ## 7. Open from the phone
 
 1. Phone on Tailscale.
-2. Browser: `http://<pi-magicdns>:4173`  
-   Example: `http://raspberrypi.tailXXXX.ts.net:4173`
+2. For day-to-day browsing: `http://<magicdns>:4173` works fine.
+3. **To install as a home-screen app (PWA)** Chrome needs **HTTPS**. Plain `http://…ts.net:4173` only allows “Create shortcut” (opens Chrome). Enable Tailscale Serve once per machine:
+
+```bash
+# First time: open the link Tailscale prints (enable Serve on your tailnet), then:
+tailscale serve --bg 4173
+tailscale serve status
+# Phone: https://<magicdns>/   (no :4173 — Serve terminates TLS on 443)
+```
 
 Do **not** port-forward 4173 on your 5G modem. Tailscale is enough.
 

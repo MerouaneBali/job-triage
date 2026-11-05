@@ -31,6 +31,11 @@ import {
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const detailsHtmlDir = join(root, "data", "dumps", "details");
+const stopFile = join(root, "data", ".pipeline-stop");
+
+function stopRequested() {
+  return existsSync(stopFile);
+}
 
 const args = process.argv.slice(2);
 if (args.length === 0 || args.includes("--help")) {
@@ -277,7 +282,31 @@ if (!pending.length) {
   process.exit(0);
 }
 
-const browser = await chromium.launch({
+let browser = null;
+let stopping = false;
+
+function requestStop(reason) {
+  if (stopping) return;
+  stopping = true;
+  console.error(`Stop (${reason}): exiting…`);
+  // Exit ASAP — do not keep walking the job list after the browser dies.
+  try {
+    browser?.close().catch(() => {});
+  } catch {
+    // ignore
+  }
+  try {
+    db.close();
+  } catch {
+    // ignore
+  }
+  process.exit(130);
+}
+
+process.once("SIGTERM", () => requestStop("SIGTERM"));
+process.once("SIGINT", () => requestStop("SIGINT"));
+
+browser = await chromium.launch({
   headless,
   proxy: parseProxy(proxyUrl),
 });
@@ -292,6 +321,10 @@ const page = await context.newPage();
 let index = 0;
 try {
   for (const job of pending) {
+    if (stopping || stopRequested()) {
+      requestStop(stopRequested() ? "stop-file" : "flag");
+      break;
+    }
     index += 1;
     console.log(`\n[${index}/${pending.length}] ${job.id} — ${job.title || "?"}`);
     console.log(job.url);
@@ -389,7 +422,16 @@ try {
       status = "error";
       error = String(e && e.message ? e.message : e);
       console.error("Fetch error:", error);
+      // Browser was killed by Stop — don't grind through the rest of the dump.
+      if (
+        stopping ||
+        /has been closed|Target closed|browser has been closed/i.test(error)
+      ) {
+        requestStop("browser-closed");
+      }
     }
+
+    if (stopping) break;
 
     saveDetail(db, dump.id, {
       id: job.id,
@@ -412,11 +454,31 @@ try {
       const wait = Math.max(1000, baseDelay + jitter);
       console.log(`Waiting ${wait}ms…`);
       await sleep(wait);
+      if (stopping) break;
     }
   }
 } finally {
-  await context.close();
-  await browser.close();
+  if (!stopping) {
+    try {
+      await context.close();
+    } catch {
+      // ignore
+    }
+    try {
+      await browser?.close();
+    } catch {
+      // ignore
+    }
+  }
+}
+
+if (stopping) {
+  try {
+    db.close();
+  } catch {
+    // ignore
+  }
+  process.exit(130);
 }
 
 const refreshed = listJobsForDump(db, dump.id);

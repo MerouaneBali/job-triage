@@ -1,18 +1,31 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { config as loadDotenv } from "dotenv";
 import { dataPaths, getRepoRoot } from "./paths";
-import type { PipelineEvent, PipelineJob, PipelineKind } from "./types";
+import type {
+  PipelineEvent,
+  PipelineJob,
+  PipelineKind,
+  PipelineStopMode,
+} from "./types";
+import { PIPELINE_STOPPED_EXIT } from "./types";
 
 export type { PipelineJob };
+export { PIPELINE_STOPPED_EXIT };
 
 type Listener = (event: PipelineEvent) => void;
 
 type InternalJob = PipelineJob & {
   child: ChildProcess | null;
+  /** Numeric pid — survives stale ChildProcess handles after HMR. */
+  childPid: number | null;
   listeners: Set<Listener>;
+  abortRequested: boolean;
+  abortMode: PipelineStopMode | null;
+  /** True when this job runs multiple sequential children. */
+  isBatch: boolean;
 };
 
 /** Survive Next.js route / HMR reloads so POST + SSE share the same Map. */
@@ -20,18 +33,63 @@ const g = globalThis as typeof globalThis & {
   __jobTriagePipeline?: {
     jobs: Map<string, InternalJob>;
     activeId: string | null;
+    /** Job ids the user asked to stop — checked even if object identity drifts. */
+    abortedIds: Set<string>;
   };
 };
 if (!g.__jobTriagePipeline) {
-  g.__jobTriagePipeline = { jobs: new Map(), activeId: null };
+  g.__jobTriagePipeline = {
+    jobs: new Map(),
+    activeId: null,
+    abortedIds: new Set(),
+  };
+} else if (!g.__jobTriagePipeline.abortedIds) {
+  g.__jobTriagePipeline.abortedIds = new Set();
 }
 const jobs = g.__jobTriagePipeline.jobs;
+const abortedIds = g.__jobTriagePipeline.abortedIds;
 
 function getActiveId() {
   return g.__jobTriagePipeline!.activeId;
 }
 function setActiveId(id: string | null) {
   g.__jobTriagePipeline!.activeId = id;
+}
+
+function isAborted(job: InternalJob): boolean {
+  return job.abortRequested || abortedIds.has(job.id) || stopFilePresent();
+}
+
+function stopFilePath() {
+  return join(dataPaths().root, "data", ".pipeline-stop");
+}
+
+function stopFilePresent() {
+  try {
+    return existsSync(stopFilePath());
+  } catch {
+    return false;
+  }
+}
+
+function writeStopFile(jobId: string, mode: PipelineStopMode) {
+  try {
+    writeFileSync(
+      stopFilePath(),
+      `${jobId}\n${mode}\n${new Date().toISOString()}\n`,
+      "utf8"
+    );
+  } catch {
+    // ignore
+  }
+}
+
+function clearStopFile() {
+  try {
+    unlinkSync(stopFilePath());
+  } catch {
+    // ignore
+  }
 }
 
 function loadRepoEnv() {
@@ -48,10 +106,21 @@ function emit(job: InternalJob, event: PipelineEvent) {
   }
   if (event.type === "phase") job.phase = event.phase;
   if (event.type === "done") {
-    job.status = event.exitCode === 0 ? "done" : "error";
-    job.exitCode = event.exitCode;
-    if (event.exitCode !== 0 && !job.error) {
-      job.error = `Process exited with code ${event.exitCode}`;
+    if (
+      event.exitCode === PIPELINE_STOPPED_EXIT ||
+      isAborted(job)
+    ) {
+      job.status = "stopped";
+      job.exitCode = PIPELINE_STOPPED_EXIT;
+      job.error =
+        job.abortMode === "force" ? "Force stopped" : "Stopped (safe)";
+      abortedIds.add(job.id);
+    } else {
+      job.status = event.exitCode === 0 ? "done" : "error";
+      job.exitCode = event.exitCode;
+      if (event.exitCode !== 0 && !job.error) {
+        job.error = `Process exited with code ${event.exitCode}`;
+      }
     }
   }
   if (event.type === "error") {
@@ -69,6 +138,8 @@ function emit(job: InternalJob, event: PipelineEvent) {
 
 function finishActive(jobId: string) {
   if (getActiveId() === jobId) setActiveId(null);
+  // Stop file is only meaningful while a job is active.
+  if (!getActiveId()) clearStopFile();
 }
 
 export function getActiveJob(): PipelineJob | null {
@@ -84,7 +155,15 @@ export function getJob(id: string): PipelineJob | null {
 }
 
 function publicJob(job: InternalJob): PipelineJob {
-  const { child: _c, listeners: _l, ...rest } = job;
+  const {
+    child: _c,
+    childPid: _p,
+    listeners: _l,
+    abortRequested: _a,
+    abortMode: _m,
+    isBatch: _b,
+    ...rest
+  } = job;
   return rest;
 }
 
@@ -97,7 +176,7 @@ export function subscribe(jobId: string, listener: Listener): () => void {
     listener({ type: "log", line, stream: "stdout" });
   }
   if (job.phase) listener({ type: "phase", phase: job.phase });
-  if (job.status === "done") {
+  if (job.status === "done" || job.status === "stopped") {
     listener({ type: "done", exitCode: job.exitCode ?? 0 });
   } else if (job.status === "error") {
     if (job.exitCode != null) {
@@ -109,6 +188,181 @@ export function subscribe(jobId: string, listener: Listener): () => void {
   return () => {
     job.listeners.delete(listener);
   };
+}
+
+function playwrightEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  if (
+    env.PLAYWRIGHT_BROWSERS_PATH &&
+    /cursor-sandbox-cache|Cursor\/AgentStores/i.test(env.PLAYWRIGHT_BROWSERS_PATH)
+  ) {
+    delete env.PLAYWRIGHT_BROWSERS_PATH;
+  }
+  return env;
+}
+
+function spawnNodeChild(
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  cwd: string
+): ChildProcess {
+  // Own process group on Unix so we can SIGTERM/SIGKILL Node + Playwright Chromium together.
+  return spawn(process.execPath, args, {
+    cwd,
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: process.platform !== "win32",
+  });
+}
+
+/** Kill Node + Playwright Chromium descendants. */
+function killPidTree(pid: number, signal: "SIGTERM" | "SIGKILL") {
+  if (process.platform === "win32") {
+    execFile(
+      "taskkill",
+      ["/pid", String(pid), "/T", ...(signal === "SIGKILL" ? ["/F"] : [])],
+      { stdio: "ignore" },
+      () => {}
+    );
+    return;
+  }
+  // Children first (Playwright's Chromium), then the node process / process group.
+  execFile(
+    "pkill",
+    [signal === "SIGKILL" ? "-KILL" : "-TERM", "-P", String(pid)],
+    { stdio: "ignore" },
+    () => {}
+  );
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    // not a group leader (spawned before detached:true)
+  }
+  try {
+    process.kill(pid, signal);
+  } catch {
+    // already dead
+  }
+}
+
+function killJobProcess(job: InternalJob, mode: PipelineStopMode) {
+  const pid = job.childPid ?? job.child?.pid ?? null;
+  if (pid == null) return;
+
+  if (mode === "force") {
+    killPidTree(pid, "SIGKILL");
+    return;
+  }
+
+  // Safe: SIGTERM so fetch-details can exit(130); hard-kill tree if still alive.
+  killPidTree(pid, "SIGTERM");
+  const child = job.child;
+  const escalateAt = setTimeout(() => {
+    if (child && (child.exitCode != null || child.signalCode != null)) return;
+    try {
+      killPidTree(pid, "SIGKILL");
+    } catch {
+      // ignore
+    }
+  }, 1500);
+  child?.once("exit", () => clearTimeout(escalateAt));
+}
+
+/** Belt-and-suspenders: kill any pipeline CLI the ChildProcess handle missed. */
+function pkillPipelineChildren(mode: PipelineStopMode) {
+  if (process.platform === "win32") return;
+  const sig = mode === "force" ? "-KILL" : "-TERM";
+  for (const pat of [
+    "src/stage2/fetch-details.mjs",
+    "src/stage3/run.mjs",
+    "src/stage1/parse-jobs.mjs",
+  ]) {
+    execFile("pkill", [sig, "-f", pat], { stdio: "ignore" }, () => {});
+  }
+  if (mode === "safe") {
+    setTimeout(() => {
+      for (const pat of [
+        "src/stage2/fetch-details.mjs",
+        "src/stage3/run.mjs",
+        "src/stage1/parse-jobs.mjs",
+      ]) {
+        execFile("pkill", ["-KILL", "-f", pat], { stdio: "ignore" }, () => {});
+      }
+    }, 1500);
+  }
+}
+
+/**
+ * Stop a running pipeline job.
+ * Safe = SIGTERM + skip remaining batch items. Force = SIGKILL + same.
+ * Finished SQLite writes are kept; the current dump may be partial.
+ */
+export function cancelJob(
+  id: string,
+  mode: PipelineStopMode
+): PipelineJob {
+  const job = jobs.get(id);
+  if (!job) {
+    throw Object.assign(new Error("Job not found"), { status: 404 });
+  }
+  if (job.status !== "running") {
+    throw Object.assign(new Error("Job is not running"), { status: 409 });
+  }
+
+  job.abortRequested = true;
+  job.abortMode = mode;
+  abortedIds.add(id);
+  writeStopFile(id, mode);
+  // Mark every running job — HMR can leave the batch loop holding a stale view.
+  for (const j of jobs.values()) {
+    if (j.status === "running") {
+      j.abortRequested = true;
+      j.abortMode = mode;
+      abortedIds.add(j.id);
+    }
+  }
+
+  emit(job, {
+    type: "log",
+    line:
+      mode === "force"
+        ? "Force stop requested — killing process tree…"
+        : "Safe stop requested — stopping current fetch (SIGTERM, then SIGKILL if needed)…",
+    stream: "stderr",
+  });
+  emit(job, {
+    type: "log",
+    line:
+      "Partial progress is kept in SQLite. Remaining batch dumps are skipped. Re-run to continue pending jobs.",
+    stream: "stderr",
+  });
+
+  if (job.child || job.childPid != null) {
+    killJobProcess(job, mode);
+  } else if (!job.isBatch) {
+    // No child and not a batch — mark stopped immediately
+    emit(job, { type: "done", exitCode: PIPELINE_STOPPED_EXIT });
+    finishActive(id);
+  }
+
+  // Last resort: kill any Stage 2/3 CLI still alive (covers stale ChildProcess handles).
+  pkillPipelineChildren(mode);
+
+  // If the child never signals close (or batch ignores abort), finish after a beat.
+  setTimeout(() => {
+    const current = jobs.get(id);
+    if (!current || current.status !== "running") return;
+    if (!isAborted(current)) return;
+    emit(current, {
+      type: "log",
+      line: "Stop watchdog: forcing batch done (child did not report stop).",
+      stream: "stderr",
+    });
+    emit(current, { type: "done", exitCode: PIPELINE_STOPPED_EXIT });
+    finishActive(id);
+  }, mode === "force" ? 800 : 2500);
+
+  return publicJob(job);
 }
 
 function startChild(
@@ -129,6 +383,8 @@ function startChild(
   loadRepoEnv();
   const root = getRepoRoot();
   const id = randomUUID();
+  abortedIds.delete(id);
+  clearStopFile();
   const job: InternalJob = {
     id,
     kind,
@@ -139,27 +395,18 @@ function startChild(
     logs: [],
     phase,
     child: null,
+    childPid: null,
     listeners: new Set(),
+    abortRequested: false,
+    abortMode: null,
+    isBatch: false,
   };
   jobs.set(id, job);
   setActiveId(id);
 
-  const env = { ...process.env };
-  // Cursor agent sandboxes set PLAYWRIGHT_BROWSERS_PATH to a cache that often
-  // lacks Chromium — drop it so headed Stage 2 uses the normal user install.
-  if (
-    env.PLAYWRIGHT_BROWSERS_PATH &&
-    /cursor-sandbox-cache|Cursor\/AgentStores/i.test(env.PLAYWRIGHT_BROWSERS_PATH)
-  ) {
-    delete env.PLAYWRIGHT_BROWSERS_PATH;
-  }
-
-  const child = spawn(process.execPath, args, {
-    cwd: root,
-    env,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const child = spawnNodeChild(args, playwrightEnv(), root);
   job.child = child;
+  job.childPid = child.pid ?? null;
   emit(job, { type: "phase", phase });
   emit(job, {
     type: "log",
@@ -178,12 +425,24 @@ function startChild(
   child.stderr.on("data", onChunk("stderr"));
 
   child.on("error", (err) => {
-    emit(job, { type: "error", message: err.message });
+    job.child = null;
+    job.childPid = null;
+    if (isAborted(job)) {
+      emit(job, { type: "done", exitCode: PIPELINE_STOPPED_EXIT });
+    } else {
+      emit(job, { type: "error", message: err.message });
+    }
     finishActive(id);
   });
 
   child.on("close", (code) => {
-    emit(job, { type: "done", exitCode: code ?? 1 });
+    job.child = null;
+    job.childPid = null;
+    if (isAborted(job)) {
+      emit(job, { type: "done", exitCode: PIPELINE_STOPPED_EXIT });
+    } else {
+      emit(job, { type: "done", exitCode: code ?? 1 });
+    }
     finishActive(id);
   });
 
@@ -271,12 +530,13 @@ function spawnLogged(
 ): Promise<number> {
   const root = getRepoRoot();
   return new Promise((resolvePromise) => {
-    const child = spawn(process.execPath, args, {
-      cwd: root,
-      env,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    if (isAborted(job)) {
+      resolvePromise(PIPELINE_STOPPED_EXIT);
+      return;
+    }
+    const child = spawnNodeChild(args, env, root);
     job.child = child;
+    job.childPid = child.pid ?? null;
     emit(job, {
       type: "log",
       line: `$ node ${args.join(" ")}`,
@@ -292,16 +552,20 @@ function spawnLogged(
     child.stdout.on("data", onChunk("stdout"));
     child.stderr.on("data", onChunk("stderr"));
     child.on("error", (err) => {
+      job.child = null;
+      job.childPid = null;
       emit(job, {
         type: "log",
         line: `spawn error: ${err.message}`,
         stream: "stderr",
       });
-      resolvePromise(1);
+      resolvePromise(isAborted(job) ? PIPELINE_STOPPED_EXIT : 1);
     });
     child.on("close", (code) => {
       job.child = null;
-      resolvePromise(code ?? 1);
+      job.childPid = null;
+      // Re-read abort from global set — object flag can drift across HMR.
+      resolvePromise(isAborted(job) ? PIPELINE_STOPPED_EXIT : (code ?? 1));
     });
   });
 }
@@ -319,6 +583,8 @@ function startBatch(
 
   loadRepoEnv();
   const id = randomUUID();
+  abortedIds.delete(id);
+  clearStopFile();
   const job: InternalJob = {
     id,
     kind,
@@ -329,18 +595,16 @@ function startBatch(
     logs: [],
     phase,
     child: null,
+    childPid: null,
     listeners: new Set(),
+    abortRequested: false,
+    abortMode: null,
+    isBatch: true,
   };
   jobs.set(id, job);
   setActiveId(id);
 
-  const env = { ...process.env };
-  if (
-    env.PLAYWRIGHT_BROWSERS_PATH &&
-    /cursor-sandbox-cache|Cursor\/AgentStores/i.test(env.PLAYWRIGHT_BROWSERS_PATH)
-  ) {
-    delete env.PLAYWRIGHT_BROWSERS_PATH;
-  }
+  const env = playwrightEnv();
 
   emit(job, { type: "phase", phase });
   emit(job, {
@@ -351,7 +615,17 @@ function startBatch(
 
   void (async () => {
     let failures = 0;
+    let stopped = false;
     for (let i = 0; i < items.length; i++) {
+      if (isAborted(job)) {
+        stopped = true;
+        emit(job, {
+          type: "log",
+          line: `Batch aborted before item ${i + 1}/${items.length}`,
+          stream: "stderr",
+        });
+        break;
+      }
       const item = items[i]!;
       emit(job, {
         type: "phase",
@@ -363,6 +637,15 @@ function startBatch(
         stream: "stdout",
       });
       const code = await spawnLogged(job, item.args, env);
+      if (isAborted(job) || code === PIPELINE_STOPPED_EXIT) {
+        stopped = true;
+        emit(job, {
+          type: "log",
+          line: `Stopped during ${item.label} (${i + 1}/${items.length}). Later items skipped.`,
+          stream: "stderr",
+        });
+        break;
+      }
       if (code !== 0) {
         failures += 1;
         emit(job, {
@@ -372,15 +655,19 @@ function startBatch(
         });
       }
     }
-    const exitCode = failures === 0 ? 0 : failures === items.length ? 1 : 0;
-    if (failures && exitCode === 0) {
-      emit(job, {
-        type: "log",
-        line: `Batch finished with ${failures}/${items.length} failures (overall ok)`,
-        stream: "stderr",
-      });
+    if (stopped || isAborted(job)) {
+      emit(job, { type: "done", exitCode: PIPELINE_STOPPED_EXIT });
+    } else {
+      const exitCode = failures === 0 ? 0 : failures === items.length ? 1 : 0;
+      if (failures && exitCode === 0) {
+        emit(job, {
+          type: "log",
+          line: `Batch finished: ${items.length - failures}/${items.length} dumps exited 0; ${failures} exited non-zero (batch still overall ok — check dump health marks for partial/failed jobs)`,
+          stream: "stderr",
+        });
+      }
+      emit(job, { type: "done", exitCode });
     }
-    emit(job, { type: "done", exitCode });
     finishActive(id);
   })();
 

@@ -17,14 +17,28 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { DumpSummary, HtmlDump, PipelineJob } from "@/lib/types";
+import {
+  DumpHealthMark,
+  HtmlParseMark,
+  dumpFetchHealth,
+  dumpFetchHint,
+} from "@/components/dump-health";
+import {
+  PIPELINE_STOPPED_EXIT,
+  type DumpSummary,
+  type HtmlDump,
+  type PipelineJob,
+  type PipelineStopMode,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {
   Bot,
   ChevronDown,
   FileSearch,
   Loader2,
+  OctagonX,
   Sparkles,
+  Square,
   Terminal,
   Upload,
   X,
@@ -91,9 +105,15 @@ function DumpSelect({
         <SelectValue placeholder="Parsed dump…">
           {(value) => {
             const d = dumps.find((x) => x.name === value);
+            if (!d) {
+              return (
+                <span className="truncate">{String(value ?? "")}</span>
+              );
+            }
             return (
-              <span className="truncate">
-                {d?.label || d?.name || String(value ?? "")}
+              <span className="flex min-w-0 items-center gap-2">
+                <DumpHealthMark dump={d} />
+                <span className="truncate">{d.label || d.name}</span>
               </span>
             );
           }}
@@ -101,8 +121,21 @@ function DumpSelect({
       </SelectTrigger>
       <SelectContent>
         {dumps.map((d) => (
-          <SelectItem key={d.name} value={d.name} label={d.label || d.name}>
-            {d.label || d.name}
+          <SelectItem
+            key={d.name}
+            value={d.name}
+            label={`${d.label || d.name} · ${dumpFetchHint(d)}`}
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <DumpHealthMark dump={d} />
+              <span className="min-w-0 truncate">{d.label || d.name}</span>
+              {(d.detailsFailed ?? 0) > 0 ||
+              (d.jobCount ?? 0) > (d.detailsOk ?? 0) ? (
+                <span className="shrink-0 text-[10px] text-muted-foreground">
+                  {dumpFetchHint(d)}
+                </span>
+              ) : null}
+            </span>
           </SelectItem>
         ))}
       </SelectContent>
@@ -228,6 +261,7 @@ export function PipelineBar({
   const [logs, setLogs] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [stageOpen, setStageOpen] = useState<Record<StageKey, boolean>>({
     "1": true,
     "2": true,
@@ -237,8 +271,10 @@ export function PipelineBar({
   const fileRef = useRef<HTMLInputElement>(null);
   const logsRef = useRef<string[]>([]);
   const esRef = useRef<EventSource | null>(null);
+  const jobRef = useRef<PipelineJob | null>(null);
   const finishedRef = useRef(onJobFinished);
   finishedRef.current = onJobFinished;
+  jobRef.current = job;
 
   useEffect(() => {
     setStageOpen(readStageOpen());
@@ -263,7 +299,9 @@ export function PipelineBar({
         const data = (await res.json()) as { job: PipelineJob | null };
         if (cancelled || !data.job || data.job.status !== "running") return;
         setJob(data.job);
+        setBusy(true);
         setLogOpen(true);
+        // SSE subscribe() replays buffered logs + current phase
         attachStream(data.job.id);
       } catch {
         // ignore
@@ -298,10 +336,14 @@ export function PipelineBar({
   function attachStream(jobId: string) {
     esRef.current?.close();
     setBusy(true);
+    setStopping(false);
     setLogs([]);
     logsRef.current = [];
     const es = new EventSource(`/api/pipeline/jobs/${jobId}/stream`);
     esRef.current = es;
+    let sawTerminal = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
     es.onmessage = (ev) => {
       try {
         const data = JSON.parse(ev.data) as {
@@ -319,19 +361,35 @@ export function PipelineBar({
           setJob((j) => (j ? { ...j, phase: data.phase! } : j));
         }
         if (data.type === "done") {
+          sawTerminal = true;
+          if (reconnectTimer) clearTimeout(reconnectTimer);
           es.close();
           if (esRef.current === es) esRef.current = null;
           setBusy(false);
+          setStopping(false);
+          const exitCode = data.exitCode ?? 1;
+          const stopped = exitCode === PIPELINE_STOPPED_EXIT;
           setJob((j) =>
             j
               ? {
                   ...j,
-                  status: data.exitCode === 0 ? "done" : "error",
-                  exitCode: data.exitCode ?? 1,
+                  status: stopped
+                    ? "stopped"
+                    : exitCode === 0
+                      ? "done"
+                      : "error",
+                  exitCode,
                 }
               : j
           );
-          if (data.exitCode === 0) {
+          if (stopped) {
+            toast.message("Pipeline stopped", {
+              description:
+                "Finished work is kept. Re-run to continue pending jobs.",
+            });
+            finishedRef.current();
+            void refreshHtml();
+          } else if (exitCode === 0) {
             const joined = logsRef.current.join("\n");
             if (/Nothing to do/i.test(joined)) {
               toast.message("Nothing to fetch — jobs already have descriptions", {
@@ -353,25 +411,75 @@ export function PipelineBar({
                 "Playwright Chromium missing — run npx playwright install chromium"
               );
             } else {
-              toast.error(`Pipeline failed (exit ${data.exitCode})`);
+              toast.error(`Pipeline failed (exit ${exitCode})`);
             }
+            finishedRef.current();
+            void refreshHtml();
           }
         }
         if (data.type === "error") {
+          sawTerminal = true;
+          if (reconnectTimer) clearTimeout(reconnectTimer);
           es.close();
           if (esRef.current === es) esRef.current = null;
           setBusy(false);
+          setStopping(false);
           toast.error(data.message || "Pipeline error");
         }
       } catch {
         // ignore
       }
     };
+    // Transient SSE blips must not clear busy / drop the phase label.
     es.onerror = () => {
+      if (sawTerminal) return;
       es.close();
       if (esRef.current === es) esRef.current = null;
+      if (jobRef.current?.status === "running" && jobRef.current.id === jobId) {
+        // Keep busy=true; reattach so subscribe() can reseed logs + phase.
+        reconnectTimer = setTimeout(() => {
+          if (
+            jobRef.current?.status === "running" &&
+            jobRef.current.id === jobId &&
+            !esRef.current
+          ) {
+            attachStream(jobId);
+          }
+        }, 800);
+        return;
+      }
       setBusy(false);
     };
+  }
+
+  async function stopPipeline(mode: PipelineStopMode) {
+    const id = jobRef.current?.id;
+    if (!id || jobRef.current?.status !== "running") return;
+    setStopping(true);
+    try {
+      const res = await fetch(
+        `/api/pipeline/jobs/${encodeURIComponent(id)}/stop`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode }),
+        }
+      );
+      const data = (await res.json()) as {
+        job?: PipelineJob;
+        error?: string;
+      };
+      if (!res.ok) {
+        throw new Error(data.error || "Stop failed");
+      }
+      if (data.job) setJob(data.job);
+      toast.message(mode === "force" ? "Force stop sent" : "Safe stop sent", {
+        description: "Waiting for the process to exit…",
+      });
+    } catch (e) {
+      setStopping(false);
+      toast.error(e instanceof Error ? e.message : "Stop failed");
+    }
   }
 
   async function refreshHtml() {
@@ -449,8 +557,9 @@ export function PipelineBar({
     }
   }
 
-  const showLogChrome = busy || logs.length > 0 || Boolean(job);
-  const fabLabel = busy
+  const isRunning = busy || job?.status === "running";
+  const showLogChrome = isRunning || logs.length > 0 || Boolean(job);
+  const fabLabel = isRunning
     ? `${kindLabel(job?.kind)} · ${job?.phase || "running"}`
     : job
       ? `${kindLabel(job.kind)} · ${job.status}${
@@ -464,6 +573,9 @@ export function PipelineBar({
   );
   const dumpsNeedingFetch = dumps.filter(
     (d) => (d.jobCount ?? 0) > (d.detailsOk ?? 0)
+  );
+  const dumpsWithFetchProblems = dumps.filter(
+    (d) => dumpFetchHealth(d) === "failed"
   );
   const dumpsNeedingStage3 = dumps.filter((d) => {
     const scored = d.stage3Apply + d.stage3Maybe + d.stage3Skip;
@@ -521,23 +633,43 @@ export function PipelineBar({
                 disabled={batchOpen1}
               >
                 <SelectValue placeholder="HTML on disk…">
-                  {(value) => (
-                    <span className="truncate">
-                      {stemFromHtmlName(String(value ?? "")) || "HTML on disk…"}
-                    </span>
-                  )}
+                  {(value) => {
+                    const name = String(value ?? "");
+                    const stem = stemFromHtmlName(name);
+                    if (!stem) {
+                      return <span className="truncate">HTML on disk…</span>;
+                    }
+                    return (
+                      <span className="flex min-w-0 items-center gap-2">
+                        <HtmlParseMark parsed={parsedStems.has(stem)} />
+                        <span className="truncate">{stem}</span>
+                      </span>
+                    );
+                  }}
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
-                {htmlDumps.map((d) => (
-                  <SelectItem
-                    key={d.name}
-                    value={d.name}
-                    label={stemFromHtmlName(d.name)}
-                  >
-                    <span className="truncate">{stemFromHtmlName(d.name)}</span>
-                  </SelectItem>
-                ))}
+                {htmlDumps.map((d) => {
+                  const stem = stemFromHtmlName(d.name);
+                  const parsed = parsedStems.has(stem);
+                  return (
+                    <SelectItem
+                      key={d.name}
+                      value={d.name}
+                      label={`${stem}${parsed ? "" : " · new"}`}
+                    >
+                      <span className="flex min-w-0 items-center gap-2">
+                        <HtmlParseMark parsed={parsed} />
+                        <span className="min-w-0 truncate">{stem}</span>
+                        {!parsed ? (
+                          <span className="shrink-0 text-[10px] text-muted-foreground">
+                            new
+                          </span>
+                        ) : null}
+                      </span>
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
             <BatchDisclosure
@@ -576,25 +708,30 @@ export function PipelineBar({
                 {htmlDumps.length === 0 ? (
                   <p className="text-xs text-muted-foreground">No HTML on disk</p>
                 ) : (
-                  htmlDumps.map((d) => (
-                    <label
-                      key={d.name}
-                      className="flex min-h-9 items-center gap-2 text-xs"
-                    >
-                      <Checkbox
-                        checked={selectedHtml.has(d.name)}
-                        onCheckedChange={() =>
-                          setSelectedHtml((prev) => toggleInSet(prev, d.name))
-                        }
-                      />
-                      <span className="min-w-0 truncate">
-                        {stemFromHtmlName(d.name)}
-                        {!parsedStems.has(stemFromHtmlName(d.name)) ? (
-                          <span className="text-muted-foreground"> · new</span>
-                        ) : null}
-                      </span>
-                    </label>
-                  ))
+                  htmlDumps.map((d) => {
+                    const stem = stemFromHtmlName(d.name);
+                    const parsed = parsedStems.has(stem);
+                    return (
+                      <label
+                        key={d.name}
+                        className="flex min-h-9 items-center gap-2 text-xs"
+                      >
+                        <Checkbox
+                          checked={selectedHtml.has(d.name)}
+                          onCheckedChange={() =>
+                            setSelectedHtml((prev) => toggleInSet(prev, d.name))
+                          }
+                        />
+                        <HtmlParseMark parsed={parsed} />
+                        <span className="min-w-0 truncate">
+                          {stem}
+                          {!parsed ? (
+                            <span className="text-muted-foreground"> · new</span>
+                          ) : null}
+                        </span>
+                      </label>
+                    );
+                  })
                 )}
               </div>
             </BatchDisclosure>
@@ -687,7 +824,7 @@ export function PipelineBar({
               open={batchOpen2}
               onOpenChange={setBatchOpen2}
             >
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
                   variant="outline"
@@ -716,6 +853,20 @@ export function PipelineBar({
                 >
                   Select pending ({dumpsNeedingFetch.length})
                 </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="min-h-9 flex-1"
+                  disabled={dumpsWithFetchProblems.length === 0}
+                  onClick={() =>
+                    setSelectedFetch(
+                      new Set(dumpsWithFetchProblems.map((d) => d.name))
+                    )
+                  }
+                >
+                  Select problems ({dumpsWithFetchProblems.length})
+                </Button>
               </div>
               <div className="max-h-36 space-y-1 overflow-y-auto rounded-md border p-2">
                 {dumpsOldestFirst.length === 0 ? (
@@ -724,7 +875,11 @@ export function PipelineBar({
                   dumpsOldestFirst.map((d) => (
                     <label
                       key={d.name}
-                      className="flex min-h-9 items-center gap-2 text-xs"
+                      className={cn(
+                        "flex min-h-9 items-center gap-2 text-xs",
+                        dumpFetchHealth(d) === "failed" &&
+                          "rounded bg-amber-500/10 px-1"
+                      )}
                     >
                       <Checkbox
                         checked={selectedFetch.has(d.name)}
@@ -732,14 +887,13 @@ export function PipelineBar({
                           setSelectedFetch((prev) => toggleInSet(prev, d.name))
                         }
                       />
-                      <span className="min-w-0 truncate">
+                      <DumpHealthMark dump={d} />
+                      <span className="min-w-0 flex-1 truncate">
                         {d.label || d.name}
-                        {(d.jobCount ?? 0) > (d.detailsOk ?? 0) ? (
-                          <span className="text-muted-foreground">
-                            {" "}
-                            · {(d.jobCount ?? 0) - (d.detailsOk ?? 0)} pending
-                          </span>
-                        ) : null}
+                        <span className="text-muted-foreground">
+                          {" "}
+                          · {dumpFetchHint(d)}
+                        </span>
                       </span>
                     </label>
                   ))
@@ -882,7 +1036,11 @@ export function PipelineBar({
                   dumpsOldestFirst.map((d) => (
                     <label
                       key={d.name}
-                      className="flex min-h-9 items-center gap-2 text-xs"
+                      className={cn(
+                        "flex min-h-9 items-center gap-2 text-xs",
+                        dumpFetchHealth(d) === "failed" &&
+                          "rounded bg-amber-500/10 px-1"
+                      )}
                     >
                       <Checkbox
                         checked={selectedStage3.has(d.name)}
@@ -892,8 +1050,13 @@ export function PipelineBar({
                           )
                         }
                       />
-                      <span className="min-w-0 truncate">
+                      <DumpHealthMark dump={d} />
+                      <span className="min-w-0 flex-1 truncate">
                         {d.label || d.name}
+                        <span className="text-muted-foreground">
+                          {" "}
+                          · {dumpFetchHint(d)}
+                        </span>
                       </span>
                     </label>
                   ))
@@ -961,7 +1124,7 @@ export function PipelineBar({
             aria-hidden={logOpen}
             tabIndex={logOpen ? -1 : 0}
           >
-            {busy ? (
+            {isRunning ? (
               <Loader2 className="size-4 shrink-0 animate-spin text-amber-400" />
             ) : (
               <Terminal className="size-4 shrink-0 text-zinc-400" />
@@ -984,7 +1147,7 @@ export function PipelineBar({
             aria-hidden={!logOpen}
           >
             <div className="flex shrink-0 items-center gap-2 border-b border-zinc-800 px-3 py-2 text-zinc-300">
-              {busy ? (
+              {isRunning ? (
                 <Loader2 className="size-4 shrink-0 animate-spin text-amber-400" />
               ) : (
                 <Terminal className="size-4 shrink-0 text-zinc-400" />
@@ -992,13 +1155,39 @@ export function PipelineBar({
               <span className="min-w-0 flex-1 truncate font-mono text-[11px]">
                 {fabLabel}
               </span>
+              {isRunning ? (
+                <>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={stopping}
+                    className="min-h-11 shrink-0 gap-1 px-2 text-[11px] text-amber-300 hover:bg-zinc-800 hover:text-amber-200"
+                    onClick={() => void stopPipeline("safe")}
+                  >
+                    <Square className="size-3.5" />
+                    Stop
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={stopping}
+                    className="min-h-11 shrink-0 gap-1 px-2 text-[11px] text-red-400 hover:bg-zinc-800 hover:text-red-300"
+                    onClick={() => void stopPipeline("force")}
+                  >
+                    <OctagonX className="size-3.5" />
+                    Force
+                  </Button>
+                </>
+              ) : null}
               <button
                 type="button"
                 className="min-h-11 shrink-0 px-2 text-[11px] text-zinc-400 hover:text-white"
                 onClick={() => {
                   setLogs([]);
                   logsRef.current = [];
-                  if (!busy) {
+                  if (!isRunning) {
                     setJob(null);
                     setLogOpen(false);
                   }
@@ -1021,7 +1210,11 @@ export function PipelineBar({
               ref={logScrollRef}
               className="min-h-0 flex-1 overflow-auto p-3 font-mono text-[11px] leading-relaxed break-all whitespace-pre-wrap text-zinc-100 sm:break-normal"
             >
-              {logs.length ? logs.join("\n") : busy ? "Waiting for output…" : ""}
+              {logs.length
+                ? logs.join("\n")
+                : isRunning
+                  ? "Waiting for output…"
+                  : ""}
             </div>
           </div>
         </>

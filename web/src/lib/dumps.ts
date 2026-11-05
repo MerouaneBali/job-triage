@@ -100,7 +100,8 @@ export function listDumps(): DumpSummary[] {
       SELECT
         d.*,
         (SELECT COUNT(*) FROM jobs j WHERE j.dump_id = d.id) AS job_count,
-        (SELECT COUNT(*) FROM jobs j WHERE j.dump_id = d.id AND j.description IS NOT NULL AND length(j.description) > 0) AS details_ok
+        (SELECT COUNT(*) FROM jobs j WHERE j.dump_id = d.id AND j.description IS NOT NULL AND length(j.description) > 0) AS details_ok,
+        (SELECT COUNT(*) FROM jobs j WHERE j.dump_id = d.id AND j.detail_status IN ('error', 'missing_description')) AS details_failed
       FROM dumps d
       ORDER BY COALESCE(d.updated_at, d.parsed_at, d.dumped_at) DESC
     `
@@ -116,6 +117,7 @@ export function listDumps(): DumpSummary[] {
       summary_skip: number;
       job_count: number;
       details_ok: number;
+      details_failed: number;
     }>;
 
     return rows.map((d) => ({
@@ -126,6 +128,7 @@ export function listDumps(): DumpSummary[] {
       dumpedAt: d.dumped_at,
       source: d.source_html,
       detailsOk: d.details_ok ?? 0,
+      detailsFailed: d.details_failed ?? 0,
       stage3Apply: d.summary_apply ?? 0,
       stage3Maybe: d.summary_maybe ?? 0,
       stage3Skip: d.summary_skip ?? 0,

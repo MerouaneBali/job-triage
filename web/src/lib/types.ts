@@ -89,6 +89,8 @@ export type DumpSummary = {
   dumpedAt: string | null;
   source: string | null;
   detailsOk: number;
+  /** Jobs with detail_status error / missing_description after a fetch attempt. */
+  detailsFailed: number;
   stage3Apply: number;
   stage3Maybe: number;
   stage3Skip: number;
@@ -125,16 +127,21 @@ export type PipelineKind =
   | "fetch-batch"
   | "stage3-batch";
 
+export type PipelineStopMode = "safe" | "force";
+
 export type PipelineJob = {
   id: string;
   kind: PipelineKind;
   startedAt: string;
-  status: "running" | "done" | "error";
+  status: "running" | "done" | "error" | "stopped";
   exitCode: number | null;
   error: string | null;
   logs: string[];
   phase: string;
 };
+
+/** Exit code used when the user stops a pipeline job. */
+export const PIPELINE_STOPPED_EXIT = 130;
 
 export type PipelineEvent =
   | { type: "log"; line: string; stream: "stdout" | "stderr" }

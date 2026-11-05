@@ -28,6 +28,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  DumpHealthMark,
+  dumpFetchHint,
+} from "@/components/dump-health";
 import { ALL_DUMPS, type DumpDetail, type DumpSummary, type JobRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Briefcase, ListFilter, RefreshCw, Workflow } from "lucide-react";
@@ -338,9 +342,15 @@ export function TriageApp() {
                         );
                       }
                       const d = dumps.find((x) => x.name === value);
+                      if (!d) {
+                        return (
+                          <span className="truncate">{String(value ?? "")}</span>
+                        );
+                      }
                       return (
-                        <span className="truncate">
-                          {d?.label || d?.name || String(value ?? "")}
+                        <span className="flex min-w-0 items-center gap-2">
+                          <DumpHealthMark dump={d} />
+                          <span className="truncate">{d.label || d.name}</span>
                         </span>
                       );
                     }}
@@ -354,9 +364,20 @@ export function TriageApp() {
                     <SelectItem
                       key={d.name}
                       value={d.name}
-                      label={d.label || d.name}
+                      label={`${d.label || d.name} · ${dumpFetchHint(d)}`}
                     >
-                      {d.label || d.name}
+                      <span className="flex min-w-0 items-center gap-2">
+                        <DumpHealthMark dump={d} />
+                        <span className="min-w-0 truncate">
+                          {d.label || d.name}
+                        </span>
+                        {(d.detailsFailed ?? 0) > 0 ||
+                        (d.jobCount ?? 0) > (d.detailsOk ?? 0) ? (
+                          <span className="shrink-0 text-[10px] text-muted-foreground">
+                            {dumpFetchHint(d)}
+                          </span>
+                        ) : null}
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>

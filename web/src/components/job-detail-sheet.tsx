@@ -70,30 +70,47 @@ export function JobDetailSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="flex h-full max-h-dvh w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-xl"
+        className="flex h-full max-h-dvh !w-full max-w-none flex-col gap-0 overflow-hidden p-0 sm:!max-w-xl"
         showCloseButton
       >
         {job ? (
           <>
             <SheetHeader className="shrink-0 border-b">
-              <div className="flex items-start gap-3 pr-8">
-                <CompanyLogo src={job.logoUrl} company={job.company} className="size-10" />
-                <div className="min-w-0 flex-1 space-y-1">
-                  <div className="flex items-start justify-between gap-2">
-                    <SheetTitle className="text-lg leading-snug">
-                      {job.title || "Untitled role"}
-                    </SheetTitle>
-                    <DecisionBadge decision={job.decision ?? null} />
+              {/* Mobile: stacked header. Desktop: logo | title+badge side-by-side */}
+              <div className="flex flex-col gap-3 pr-8 sm:flex-row sm:items-start">
+                <div className="flex items-start gap-3 sm:contents">
+                  <CompanyLogo
+                    src={job.logoUrl}
+                    company={job.company}
+                    className="size-10 shrink-0"
+                  />
+                  <div className="min-w-0 flex-1 space-y-1.5 sm:space-y-1">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <SheetTitle className="text-base leading-snug sm:text-lg">
+                        {job.title || "Untitled role"}
+                      </SheetTitle>
+                      <div className="hidden shrink-0 sm:block">
+                        <DecisionBadge decision={job.decision ?? null} />
+                      </div>
+                    </div>
+                    <SheetDescription className="text-sm">
+                      {[job.company, job.location].filter(Boolean).join(" · ") ||
+                        "No company / location"}
+                    </SheetDescription>
+                    <div className="flex flex-wrap items-center gap-2 sm:hidden">
+                      <DecisionBadge decision={job.decision ?? null} />
+                      {job.fitScore != null ? (
+                        <Badge variant="secondary">Score {job.fitScore}</Badge>
+                      ) : null}
+                    </div>
                   </div>
-                  <SheetDescription className="text-sm">
-                    {[job.company, job.location].filter(Boolean).join(" · ") ||
-                      "No company / location"}
-                  </SheetDescription>
                 </div>
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
                 {job.fitScore != null ? (
-                  <Badge variant="secondary">Score {job.fitScore}</Badge>
+                  <Badge variant="secondary" className="max-sm:hidden">
+                    Score {job.fitScore}
+                  </Badge>
                 ) : null}
                 {job.confidence != null ? (
                   <Badge variant="secondary">
@@ -116,9 +133,9 @@ export function JobDetailSheet({
                     href={job.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex h-7 items-center gap-1.5 rounded-lg bg-[#0A66C2] px-2.5 text-xs font-medium text-white hover:bg-[#004182]"
+                    className="inline-flex h-7 items-center gap-1.5 rounded-lg bg-[#0A66C2] px-2.5 text-xs font-medium whitespace-nowrap text-white hover:bg-[#004182]"
                   >
-                    <LinkedInIcon className="size-3.5" />
+                    <LinkedInIcon className="size-3.5 shrink-0" />
                     Open on LinkedIn
                   </a>
                 ) : null}

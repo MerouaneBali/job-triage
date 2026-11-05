@@ -15,8 +15,24 @@ type InternalJob = PipelineJob & {
   listeners: Set<Listener>;
 };
 
-const jobs = new Map<string, InternalJob>();
-let activeId: string | null = null;
+/** Survive Next.js route / HMR reloads so POST + SSE share the same Map. */
+const g = globalThis as typeof globalThis & {
+  __jobTriagePipeline?: {
+    jobs: Map<string, InternalJob>;
+    activeId: string | null;
+  };
+};
+if (!g.__jobTriagePipeline) {
+  g.__jobTriagePipeline = { jobs: new Map(), activeId: null };
+}
+const jobs = g.__jobTriagePipeline.jobs;
+
+function getActiveId() {
+  return g.__jobTriagePipeline!.activeId;
+}
+function setActiveId(id: string | null) {
+  g.__jobTriagePipeline!.activeId = id;
+}
 
 function loadRepoEnv() {
   const { envFile } = dataPaths();
@@ -52,10 +68,11 @@ function emit(job: InternalJob, event: PipelineEvent) {
 }
 
 function finishActive(jobId: string) {
-  if (activeId === jobId) activeId = null;
+  if (getActiveId() === jobId) setActiveId(null);
 }
 
 export function getActiveJob(): PipelineJob | null {
+  const activeId = getActiveId();
   if (!activeId) return null;
   const job = jobs.get(activeId);
   return job ? publicJob(job) : null;
@@ -99,8 +116,9 @@ function startChild(
   args: string[],
   phase: string
 ): PipelineJob {
-  if (activeId) {
-    const active = jobs.get(activeId);
+  const currentActive = getActiveId();
+  if (currentActive) {
+    const active = jobs.get(currentActive);
     if (active?.status === "running") {
       const err = new Error("A pipeline job is already running");
       (err as Error & { status: number }).status = 409;
@@ -124,11 +142,21 @@ function startChild(
     listeners: new Set(),
   };
   jobs.set(id, job);
-  activeId = id;
+  setActiveId(id);
+
+  const env = { ...process.env };
+  // Cursor agent sandboxes set PLAYWRIGHT_BROWSERS_PATH to a cache that often
+  // lacks Chromium — drop it so headed Stage 2 uses the normal user install.
+  if (
+    env.PLAYWRIGHT_BROWSERS_PATH &&
+    /cursor-sandbox-cache|Cursor\/AgentStores/i.test(env.PLAYWRIGHT_BROWSERS_PATH)
+  ) {
+    delete env.PLAYWRIGHT_BROWSERS_PATH;
+  }
 
   const child = spawn(process.execPath, args, {
     cwd: root,
-    env: { ...process.env },
+    env,
     stdio: ["ignore", "pipe", "pipe"],
   });
   job.child = child;
@@ -179,7 +207,12 @@ export function startParse(htmlName: string): PipelineJob {
 
 export function startFetch(
   dumpName: string,
-  opts: { limit?: number; noPause?: boolean; headless?: boolean } = {}
+  opts: {
+    limit?: number;
+    noPause?: boolean;
+    headless?: boolean;
+    force?: boolean;
+  } = {}
 ): PipelineJob {
   const stem = dumpName.replace(/\.json$/i, "");
   if (!stem) {
@@ -191,6 +224,7 @@ export function startFetch(
   }
   if (opts.noPause !== false) args.push("--no-pause");
   if (opts.headless) args.push("--headless");
+  if (opts.force) args.push("--force");
   return startChild("fetch", args, "fetch-details");
 }
 

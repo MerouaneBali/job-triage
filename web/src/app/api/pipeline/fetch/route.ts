@@ -12,6 +12,7 @@ export async function POST(req: Request) {
       limit?: number;
       noPause?: boolean;
       headless?: boolean;
+      force?: boolean;
     };
     const dumpName = body.dumpName ? safeBasename(body.dumpName) : null;
     if (!dumpName) {
@@ -21,6 +22,7 @@ export async function POST(req: Request) {
       limit: body.limit,
       noPause: body.noPause !== false,
       headless: Boolean(body.headless),
+      force: Boolean(body.force),
     });
     return NextResponse.json({ job });
   } catch (e) {

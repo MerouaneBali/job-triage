@@ -339,6 +339,10 @@ export function TriageApp() {
         <PipelineBar
           dumpName={dumpName}
           onJobFinished={() => void refreshAll()}
+          onDumpReady={(name) => {
+            setDumpName(name);
+            void refreshAll();
+          }}
         />
       ) : null}
 

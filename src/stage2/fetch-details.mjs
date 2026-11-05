@@ -44,6 +44,7 @@ Options:
   --headed        Force headed (default)
   --headless      Headless (harder to solve captchas)
   --no-pause      Never wait for Enter (unattended / Pi); save HTML and continue on failure
+  --force         Re-fetch even when detail_status is already ok
   --reparse-only  Re-parse saved data/dumps/details/{id}.html into SQLite (no browser)
 
 Never log into the Playwright window with your LinkedIn account.`);
@@ -66,6 +67,7 @@ const proxyUrl =
   null;
 const headless = args.includes("--headless");
 const noPause = args.includes("--no-pause");
+const force = args.includes("--force");
 const reparseOnly = args.includes("--reparse-only");
 
 function sleep(ms) {
@@ -211,15 +213,19 @@ if (reparseOnly) {
 const doneIds = new Set(
   cardJobs.filter((j) => j.detailStatus === "ok" && j.description).map((j) => j.id)
 );
-let pending = cardJobs.filter((j) => j.id && j.url && !doneIds.has(j.id));
+let pending = cardJobs.filter(
+  (j) => j.id && j.url && (force || !doneIds.has(j.id))
+);
 if (Number.isFinite(limit)) pending = pending.slice(0, limit);
 
 console.log(
-  `Dump ${basename}: ${cardJobs.length} jobs · already ok: ${doneIds.size} · to fetch: ${pending.length}`
+  `Dump ${basename}: ${cardJobs.length} jobs · already ok: ${doneIds.size} · to fetch: ${pending.length}${force ? " (force)" : ""}`
 );
 if (proxyUrl) console.log(`Proxy: ${proxyUrl}`);
 if (!pending.length) {
-  console.log(`Nothing to do.`);
+  console.log(
+    `Nothing to do — every job already has a description. Use --force (or Pipeline “Force refetch”) to open the browser again.`
+  );
   db.close();
   process.exit(0);
 }

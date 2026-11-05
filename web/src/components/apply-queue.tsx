@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ComponentType, type ReactNode } from "react";
 import { toast } from "sonner";
 import { CompanyLogo } from "@/components/company-logo";
 import { DecisionBadge } from "@/components/decision-badge";
@@ -8,7 +8,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { JobRow } from "@/lib/types";
-import { Copy } from "lucide-react";
+import { cn } from "@/lib/utils";
+import {
+  Briefcase,
+  ChevronDown,
+  CircleHelp,
+  Copy,
+  FileText,
+  Lightbulb,
+  MessageSquare,
+} from "lucide-react";
 
 function LinkedInIcon({ className }: { className?: string }) {
   return (
@@ -25,6 +34,31 @@ async function copyText(label: string, text: string) {
   } catch {
     toast.error("Copy failed");
   }
+}
+
+function MaterialSection({
+  title,
+  icon: Icon,
+  action,
+  children,
+}: {
+  title: string;
+  icon: ComponentType<{ className?: string }>;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <Icon className="size-3.5 shrink-0" aria-hidden />
+          {title}
+        </p>
+        {action}
+      </div>
+      {children}
+    </div>
+  );
 }
 
 function ApplyQueueSkeleton() {
@@ -90,14 +124,28 @@ export function ApplyQueue({
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">
-        {applyCount} apply · {maybeCount} maybe
-      </p>
+      <div className="flex flex-wrap gap-2">
+        <Badge
+          variant="outline"
+          className="gap-1.5 border-transparent bg-emerald-600/15 px-2.5 py-1 text-sm font-medium text-emerald-800 dark:text-emerald-300"
+        >
+          <Briefcase className="size-3.5" aria-hidden />
+          {applyCount} apply
+        </Badge>
+        <Badge
+          variant="outline"
+          className="gap-1.5 border-transparent bg-amber-500/15 px-2.5 py-1 text-sm font-medium text-amber-900 dark:text-amber-200"
+        >
+          <CircleHelp className="size-3.5" aria-hidden />
+          {maybeCount} maybe
+        </Badge>
+      </div>
       <ul className="space-y-3">
         {queue.map((job) => {
           const open = expanded === String(job.id);
           const outreach = job.materials?.outreachMessage?.trim();
           const cover = job.materials?.coverLetter?.trim();
+          const recommendation = job.evaluation?.recommendation?.trim();
           return (
             <li
               key={job.id}
@@ -125,92 +173,117 @@ export function ApplyQueue({
                 </div>
               </div>
 
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="mt-3 grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2">
                 {job.url ? (
                   <a
                     href={job.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg bg-[#0A66C2] px-3 text-sm font-medium text-white hover:bg-[#004182] sm:flex-none"
+                    className="inline-flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-lg bg-[#0A66C2] px-3 text-sm font-medium whitespace-nowrap text-white hover:bg-[#004182]"
                   >
-                    <LinkedInIcon className="size-4" />
-                    Open LinkedIn
+                    <LinkedInIcon className="size-4 shrink-0" />
+                    <span className="md:hidden">LinkedIn</span>
+                    <span className="hidden md:inline">Open LinkedIn</span>
                   </a>
-                ) : null}
+                ) : (
+                  <span />
+                )}
                 <Button
                   variant="outline"
-                  className="min-h-11"
+                  className="min-h-11 shrink-0"
                   onClick={() => onOpenJob(job)}
                 >
                   Details
                 </Button>
                 <Button
-                  variant="ghost"
-                  className="min-h-11"
+                  variant="outline"
+                  className="min-h-11 shrink-0 gap-1.5 whitespace-nowrap"
+                  aria-expanded={open}
                   onClick={() =>
                     setExpanded(open ? null : String(job.id))
                   }
                 >
-                  {open ? "Hide materials" : "Materials"}
+                  <ChevronDown
+                    className={cn(
+                      "size-4 shrink-0 transition-transform duration-200",
+                      open && "rotate-180"
+                    )}
+                    aria-hidden
+                  />
+                  {open ? "Hide" : "Materials"}
                 </Button>
               </div>
 
-              {open ? (
-                <div className="mt-3 space-y-3 border-t pt-3">
-                  {outreach ? (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          Outreach
+              <div
+                className={cn(
+                  "grid transition-[grid-template-rows] duration-200 ease-out",
+                  open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+                )}
+              >
+                <div className="overflow-hidden">
+                  <div
+                    className={cn(
+                      "mt-3 space-y-3 border-t pt-3 transition-opacity duration-200",
+                      open ? "opacity-100" : "opacity-0"
+                    )}
+                  >
+                    {outreach ? (
+                      <MaterialSection
+                        title="Outreach"
+                        icon={MessageSquare}
+                        action={
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            className="min-h-11"
+                            onClick={() => void copyText("outreach", outreach)}
+                          >
+                            <Copy data-icon="inline-start" />
+                            Copy
+                          </Button>
+                        }
+                      >
+                        <p className="rounded-md border bg-muted/40 p-3 text-sm whitespace-pre-wrap">
+                          {outreach}
                         </p>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          className="min-h-11"
-                          onClick={() => void copyText("outreach", outreach)}
-                        >
-                          <Copy data-icon="inline-start" />
-                          Copy
-                        </Button>
-                      </div>
-                      <p className="rounded-md border bg-muted/40 p-3 text-sm whitespace-pre-wrap">
-                        {outreach}
-                      </p>
-                    </div>
-                  ) : null}
-                  {cover ? (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          Cover letter
+                      </MaterialSection>
+                    ) : null}
+                    {cover ? (
+                      <MaterialSection
+                        title="Cover letter"
+                        icon={FileText}
+                        action={
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            className="min-h-11"
+                            onClick={() => void copyText("cover letter", cover)}
+                          >
+                            <Copy data-icon="inline-start" />
+                            Copy
+                          </Button>
+                        }
+                      >
+                        <p className="rounded-md border bg-muted/40 p-3 text-sm whitespace-pre-wrap">
+                          {cover}
                         </p>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          className="min-h-11"
-                          onClick={() => void copyText("cover letter", cover)}
-                        >
-                          <Copy data-icon="inline-start" />
-                          Copy
-                        </Button>
-                      </div>
-                      <p className="rounded-md border bg-muted/40 p-3 text-sm whitespace-pre-wrap">
-                        {cover}
+                      </MaterialSection>
+                    ) : null}
+                    {!outreach && !cover ? (
+                      <p className="text-sm text-muted-foreground">
+                        No materials yet (skipped generate or not apply/maybe).
                       </p>
-                    </div>
-                  ) : null}
-                  {!outreach && !cover ? (
-                    <p className="text-sm text-muted-foreground">
-                      No materials yet (skipped generate or not apply/maybe).
-                    </p>
-                  ) : null}
-                  {job.evaluation?.recommendation ? (
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                      {job.evaluation.recommendation}
-                    </p>
-                  ) : null}
+                    ) : null}
+                    {recommendation ? (
+                      <MaterialSection title="Why this decision" icon={Lightbulb}>
+                        <p className="rounded-md border border-sky-500/20 bg-sky-50/80 p-3 text-sm leading-relaxed whitespace-pre-wrap dark:bg-sky-950/30">
+                          {recommendation}
+                        </p>
+                      </MaterialSection>
+                    ) : null}
+                  </div>
                 </div>
-              ) : null}
+              </div>
             </li>
           );
         })}

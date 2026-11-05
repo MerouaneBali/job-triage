@@ -28,7 +28,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { DumpDetail, DumpSummary, JobRow } from "@/lib/types";
+import { ALL_DUMPS, type DumpDetail, type DumpSummary, type JobRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Briefcase, ListFilter, RefreshCw, Workflow } from "lucide-react";
 import { toast } from "sonner";
@@ -78,7 +78,10 @@ export function TriageApp() {
       const list = data.dumps || [];
       setDumps(list);
       setDumpName((prev) => {
-        const next = prev || list[0]?.name || null;
+        let next: string | null;
+        if (prev === ALL_DUMPS) next = ALL_DUMPS;
+        else if (prev && list.some((d) => d.name === prev)) next = prev;
+        else next = list.length ? ALL_DUMPS : null;
         // Avoid empty-state flash between dumps settle and detail fetch.
         if (next) setLoading(true);
         return next;
@@ -93,6 +96,35 @@ export function TriageApp() {
   const loadDetail = useCallback(async (name: string) => {
     setLoading(true);
     try {
+      if (name === ALL_DUMPS) {
+        const res = await fetch("/api/inbox");
+        if (!res.ok) {
+          const err = (await res.json()) as { error?: string };
+          throw new Error(err.error || "Failed to load inbox");
+        }
+        const data = (await res.json()) as {
+          jobs: JobRow[];
+          totalRaw: number;
+          dumpsTouched: number;
+        };
+        setDetail({
+          dumpedAt: null,
+          parsedAt: null,
+          source: "all-dumps",
+          jobs: data.jobs || [],
+          detailsOk: (data.jobs || []).filter((j) => j.description).length,
+          stage3Ok: (data.jobs || []).length,
+          stage3Summary: {
+            apply: (data.jobs || []).filter((j) => j.decision === "apply")
+              .length,
+            maybe: (data.jobs || []).filter((j) => j.decision === "maybe")
+              .length,
+            skip: 0,
+            total: data.totalRaw ?? (data.jobs || []).length,
+          },
+        });
+        return;
+      }
       const res = await fetch(`/api/dumps/${encodeURIComponent(name)}`);
       if (!res.ok) {
         const err = (await res.json()) as { error?: string };
@@ -245,10 +277,18 @@ export function TriageApp() {
 
   const meta = detail
     ? [
-        `${detail.jobs.length} jobs`,
-        `${detail.detailsOk} with description`,
+        dumpName === ALL_DUMPS
+          ? `${detail.jobs.length} inbox jobs (deduped)`
+          : `${detail.jobs.length} jobs`,
+        dumpName === ALL_DUMPS
+          ? null
+          : `${detail.detailsOk} with description`,
         detail.stage3Summary
-          ? `apply ${detail.stage3Summary.apply ?? 0} · maybe ${detail.stage3Summary.maybe ?? 0} · skip ${detail.stage3Summary.skip ?? 0}`
+          ? `apply ${detail.stage3Summary.apply ?? 0} · maybe ${detail.stage3Summary.maybe ?? 0}${
+              dumpName === ALL_DUMPS
+                ? ""
+                : ` · skip ${detail.stage3Summary.skip ?? 0}`
+            }`
           : null,
         detail.dumpedAt ? `dumped ${detail.dumpedAt}` : null,
       ]
@@ -279,15 +319,24 @@ export function TriageApp() {
               <Select
                 key={dumps.map((d) => d.name).join("|") || "empty"}
                 value={
-                  dumpName && dumps.some((d) => d.name === dumpName)
-                    ? dumpName
-                    : null
+                  dumpName === ALL_DUMPS
+                    ? ALL_DUMPS
+                    : dumpName && dumps.some((d) => d.name === dumpName)
+                      ? dumpName
+                      : null
                 }
-                onValueChange={(v) => setDumpName(v)}
+                onValueChange={(v) => {
+                  if (v) setDumpName(v);
+                }}
               >
                 <SelectTrigger className="min-h-11 w-full min-w-0 flex-1 sm:min-w-[280px]">
                   <SelectValue placeholder="Select dump…">
                     {(value) => {
+                      if (value === ALL_DUMPS) {
+                        return (
+                          <span className="truncate">All dumps (Apply inbox)</span>
+                        );
+                      }
                       const d = dumps.find((x) => x.name === value);
                       return (
                         <span className="truncate">
@@ -298,6 +347,9 @@ export function TriageApp() {
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value={ALL_DUMPS} label="All dumps (Apply inbox)">
+                    All dumps (Apply inbox)
+                  </SelectItem>
                   {dumps.map((d) => (
                     <SelectItem
                       key={d.name}
@@ -345,7 +397,12 @@ export function TriageApp() {
             key={key}
             variant={view === key ? "default" : "outline"}
             className="min-h-11"
-            onClick={() => setView(key)}
+            onClick={() => {
+              if (key === "triage" && dumpName === ALL_DUMPS && dumps[0]) {
+                setDumpName(dumps[0].name);
+              }
+              setView(key);
+            }}
           >
             <Icon data-icon="inline-start" />
             {label}
@@ -355,7 +412,7 @@ export function TriageApp() {
 
       <PipelineBar
         dumps={dumps}
-        dumpName={dumpName}
+        dumpName={dumpName === ALL_DUMPS ? dumps[0]?.name ?? null : dumpName}
         onDumpChange={setDumpName}
         showStages={view === "pipeline"}
         onJobFinished={() => void refreshAll()}
@@ -376,7 +433,9 @@ export function TriageApp() {
               return {
                 ...prev,
                 jobs: prev.jobs.map((j) =>
-                  String(j.id) === String(job.id) ? { ...j, ...job } : j
+                  String(j.id) === String(job.id)
+                    ? { ...j, ...job, dumpName: job.dumpName ?? j.dumpName }
+                    : j
                 ),
               };
             });
@@ -715,7 +774,12 @@ export function TriageApp() {
                   ? "bg-primary text-primary-foreground"
                   : "text-muted-foreground"
               )}
-              onClick={() => setView(key)}
+              onClick={() => {
+                if (key === "triage" && dumpName === ALL_DUMPS && dumps[0]) {
+                  setDumpName(dumps[0].name);
+                }
+                setView(key);
+              }}
             >
               <Icon className="size-5" />
               {label}

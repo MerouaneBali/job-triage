@@ -69,10 +69,12 @@ function DumpSelect({
   dumps,
   dumpName,
   onDumpChange,
+  disabled = false,
 }: {
   dumps: DumpSummary[];
   dumpName: string | null;
   onDumpChange: (name: string) => void;
+  disabled?: boolean;
 }) {
   return (
     <Select
@@ -83,8 +85,9 @@ function DumpSelect({
       onValueChange={(v) => {
         if (v) onDumpChange(v);
       }}
+      disabled={disabled}
     >
-      <SelectTrigger className="min-h-11 w-full min-w-0">
+      <SelectTrigger className="min-h-11 w-full min-w-0" disabled={disabled}>
         <SelectValue placeholder="Parsed dump…">
           {(value) => {
             const d = dumps.find((x) => x.name === value);
@@ -144,10 +147,56 @@ function StageCard({
 }
 
 function kindLabel(kind: PipelineJob["kind"] | undefined) {
-  if (kind === "parse") return "Stage 1";
-  if (kind === "fetch") return "Stage 2";
-  if (kind === "stage3") return "Stage 3";
+  if (kind === "parse" || kind === "parse-batch") return "Stage 1";
+  if (kind === "fetch" || kind === "fetch-batch") return "Stage 2";
+  if (kind === "stage3" || kind === "stage3-batch") return "Stage 3";
   return "Pipeline";
+}
+
+function toggleInSet(prev: Set<string>, name: string) {
+  const next = new Set(prev);
+  if (next.has(name)) next.delete(name);
+  else next.add(name);
+  return next;
+}
+
+/** Collapsed-by-default batch picker so single-target stays the primary path. */
+function BatchDisclosure({
+  label,
+  selectedCount,
+  open,
+  onOpenChange,
+  children,
+}: {
+  label: string;
+  selectedCount: number;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="border-t pt-2">
+      <button
+        type="button"
+        className="flex min-h-11 w-full items-center gap-2 text-left text-xs font-medium text-muted-foreground hover:text-foreground"
+        aria-expanded={open}
+        onClick={() => onOpenChange(!open)}
+      >
+        <ChevronDown
+          className={cn(
+            "size-3.5 shrink-0 transition-transform duration-200",
+            open && "rotate-180"
+          )}
+          aria-hidden
+        />
+        <span className="min-w-0 flex-1">
+          {label}
+          {selectedCount > 0 ? ` · ${selectedCount} selected` : ""}
+        </span>
+      </button>
+      {open ? <div className="mt-2 space-y-2">{children}</div> : null}
+    </div>
+  );
 }
 
 export function PipelineBar({
@@ -168,6 +217,12 @@ export function PipelineBar({
   const [headless, setHeadless] = useState(false);
   const [forceFetch, setForceFetch] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [selectedHtml, setSelectedHtml] = useState<Set<string>>(() => new Set());
+  const [selectedFetch, setSelectedFetch] = useState<Set<string>>(() => new Set());
+  const [selectedStage3, setSelectedStage3] = useState<Set<string>>(() => new Set());
+  const [batchOpen1, setBatchOpen1] = useState(false);
+  const [batchOpen2, setBatchOpen2] = useState(false);
+  const [batchOpen3, setBatchOpen3] = useState(false);
   const [job, setJob] = useState<PipelineJob | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -402,6 +457,24 @@ export function PipelineBar({
         }`
       : "Pipeline log";
 
+  const parsedStems = new Set(dumps.map((d) => d.name));
+  const unparsedHtml = htmlDumps.filter(
+    (h) => !parsedStems.has(stemFromHtmlName(h.name))
+  );
+  const dumpsNeedingFetch = dumps.filter(
+    (d) => (d.jobCount ?? 0) > (d.detailsOk ?? 0)
+  );
+  const dumpsNeedingStage3 = dumps.filter((d) => {
+    const scored = d.stage3Apply + d.stage3Maybe + d.stage3Skip;
+    return (d.detailsOk ?? 0) > 0 && scored < (d.detailsOk ?? 0);
+  });
+  // Oldest first for batch (canonical twin wins)
+  const dumpsOldestFirst = [...dumps].sort(
+    (a, b) =>
+      new Date(a.dumpedAt || a.mtime).getTime() -
+      new Date(b.dumpedAt || b.mtime).getTime()
+  );
+
   return (
     <>
       {showStages ? (
@@ -413,8 +486,7 @@ export function PipelineBar({
             onToggle={() => toggleStage("1")}
           >
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Upload a Jobs search HTML dump (phone-friendly) or parse one
-              already on disk.
+              Upload a Jobs search HTML dump, or pick one on disk and parse it.
             </p>
             <input
               ref={fileRef}
@@ -441,8 +513,12 @@ export function PipelineBar({
                   : null
               }
               onValueChange={(v) => setHtmlName(v ?? "")}
+              disabled={batchOpen1}
             >
-              <SelectTrigger className="min-h-11 w-full min-w-0">
+              <SelectTrigger
+                className="min-h-11 w-full min-w-0"
+                disabled={batchOpen1}
+              >
                 <SelectValue placeholder="HTML on disk…">
                   {(value) => (
                     <span className="truncate">
@@ -463,17 +539,88 @@ export function PipelineBar({
                 ))}
               </SelectContent>
             </Select>
+            <BatchDisclosure
+              label="Batch parse…"
+              selectedCount={selectedHtml.size}
+              open={batchOpen1}
+              onOpenChange={setBatchOpen1}
+            >
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="min-h-9 flex-1"
+                  disabled={htmlDumps.length === 0}
+                  onClick={() =>
+                    setSelectedHtml(new Set(htmlDumps.map((d) => d.name)))
+                  }
+                >
+                  Select all
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="min-h-9 flex-1"
+                  disabled={unparsedHtml.length === 0}
+                  onClick={() =>
+                    setSelectedHtml(new Set(unparsedHtml.map((h) => h.name)))
+                  }
+                >
+                  Select unparsed ({unparsedHtml.length})
+                </Button>
+              </div>
+              <div className="max-h-36 space-y-1 overflow-y-auto rounded-md border p-2">
+                {htmlDumps.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No HTML on disk</p>
+                ) : (
+                  htmlDumps.map((d) => (
+                    <label
+                      key={d.name}
+                      className="flex min-h-9 items-center gap-2 text-xs"
+                    >
+                      <Checkbox
+                        checked={selectedHtml.has(d.name)}
+                        onCheckedChange={() =>
+                          setSelectedHtml((prev) => toggleInSet(prev, d.name))
+                        }
+                      />
+                      <span className="min-w-0 truncate">
+                        {stemFromHtmlName(d.name)}
+                        {!parsedStems.has(stemFromHtmlName(d.name)) ? (
+                          <span className="text-muted-foreground"> · new</span>
+                        ) : null}
+                      </span>
+                    </label>
+                  ))
+                )}
+              </div>
+            </BatchDisclosure>
             <Button
               className="min-h-11 w-full"
-              disabled={busy || !htmlName}
-              onClick={() =>
+              disabled={
+                busy ||
+                (batchOpen1 ? selectedHtml.size === 0 : !htmlName)
+              }
+              onClick={() => {
+                if (batchOpen1) {
+                  start(
+                    "/api/pipeline/parse-batch",
+                    { htmlNames: [...selectedHtml] },
+                    `Batch parse (${selectedHtml.size})`
+                  );
+                  return;
+                }
                 start("/api/pipeline/parse", { htmlName }, "Stage 1 parse", {
                   selectDumpAfter: stemFromHtmlName(htmlName),
-                })
-              }
+                });
+              }}
             >
               <FileSearch data-icon="inline-start" />
-              Parse
+              {batchOpen1
+                ? `Parse selected (${selectedHtml.size})`
+                : "Parse"}
             </Button>
           </StageCard>
 
@@ -484,13 +631,14 @@ export function PipelineBar({
             onToggle={() => toggleStage("2")}
           >
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Chromium runs on this machine. Skips jobs that already have
-              descriptions unless you force refetch.
+              Chromium on this machine. Twins reuse descriptions; skips jobs
+              that already have one unless you force refetch.
             </p>
             <DumpSelect
               dumps={dumps}
               dumpName={dumpName}
               onDumpChange={onDumpChange}
+              disabled={batchOpen2}
             />
             <div className="flex items-center gap-2">
               <label
@@ -532,11 +680,95 @@ export function PipelineBar({
                 Force refetch
               </label>
             </div>
+            <BatchDisclosure
+              label="Batch fetch…"
+              selectedCount={selectedFetch.size}
+              open={batchOpen2}
+              onOpenChange={setBatchOpen2}
+            >
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="min-h-9 flex-1"
+                  disabled={dumpsOldestFirst.length === 0}
+                  onClick={() =>
+                    setSelectedFetch(
+                      new Set(dumpsOldestFirst.map((d) => d.name))
+                    )
+                  }
+                >
+                  Select all
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="min-h-9 flex-1"
+                  disabled={dumpsNeedingFetch.length === 0}
+                  onClick={() =>
+                    setSelectedFetch(
+                      new Set(dumpsNeedingFetch.map((d) => d.name))
+                    )
+                  }
+                >
+                  Select pending ({dumpsNeedingFetch.length})
+                </Button>
+              </div>
+              <div className="max-h-36 space-y-1 overflow-y-auto rounded-md border p-2">
+                {dumpsOldestFirst.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No dumps</p>
+                ) : (
+                  dumpsOldestFirst.map((d) => (
+                    <label
+                      key={d.name}
+                      className="flex min-h-9 items-center gap-2 text-xs"
+                    >
+                      <Checkbox
+                        checked={selectedFetch.has(d.name)}
+                        onCheckedChange={() =>
+                          setSelectedFetch((prev) => toggleInSet(prev, d.name))
+                        }
+                      />
+                      <span className="min-w-0 truncate">
+                        {d.label || d.name}
+                        {(d.jobCount ?? 0) > (d.detailsOk ?? 0) ? (
+                          <span className="text-muted-foreground">
+                            {" "}
+                            · {(d.jobCount ?? 0) - (d.detailsOk ?? 0)} pending
+                          </span>
+                        ) : null}
+                      </span>
+                    </label>
+                  ))
+                )}
+              </div>
+            </BatchDisclosure>
             <Button
               variant="secondary"
               className="min-h-11 w-full"
-              disabled={busy || !dumpName}
-              onClick={() =>
+              disabled={
+                busy ||
+                (batchOpen2 ? selectedFetch.size === 0 : !dumpName)
+              }
+              onClick={() => {
+                if (batchOpen2) {
+                  start(
+                    "/api/pipeline/fetch-batch",
+                    {
+                      dumpNames: dumpsOldestFirst
+                        .map((d) => d.name)
+                        .filter((n) => selectedFetch.has(n)),
+                      limit: Number(fetchLimit) || undefined,
+                      noPause,
+                      headless,
+                      force: forceFetch,
+                    },
+                    `Batch fetch (${selectedFetch.size})`
+                  );
+                  return;
+                }
                 start(
                   "/api/pipeline/fetch",
                   {
@@ -547,11 +779,13 @@ export function PipelineBar({
                     force: forceFetch,
                   },
                   "Stage 2 fetch"
-                )
-              }
+                );
+              }}
             >
               <Sparkles data-icon="inline-start" />
-              Fetch
+              {batchOpen2
+                ? `Fetch selected (${selectedFetch.size})`
+                : "Fetch"}
             </Button>
           </StageCard>
 
@@ -562,12 +796,14 @@ export function PipelineBar({
             onToggle={() => toggleStage("3")}
           >
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Score fit, decide apply/maybe/skip, optionally draft outreach.
+              Score fit and draft outreach. Title+company twins reuse a prior
+              decision (saves tokens).
             </p>
             <DumpSelect
               dumps={dumps}
               dumpName={dumpName}
               onDumpChange={onDumpChange}
+              disabled={batchOpen3}
             />
             <div className="flex items-center gap-2">
               <label
@@ -602,10 +838,89 @@ export function PipelineBar({
                 Skip generate
               </label>
             </div>
+            <BatchDisclosure
+              label="Batch run…"
+              selectedCount={selectedStage3.size}
+              open={batchOpen3}
+              onOpenChange={setBatchOpen3}
+            >
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="min-h-9 flex-1"
+                  disabled={dumpsOldestFirst.length === 0}
+                  onClick={() =>
+                    setSelectedStage3(
+                      new Set(dumpsOldestFirst.map((d) => d.name))
+                    )
+                  }
+                >
+                  Select all
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="min-h-9 flex-1"
+                  disabled={dumpsNeedingStage3.length === 0}
+                  onClick={() =>
+                    setSelectedStage3(
+                      new Set(dumpsNeedingStage3.map((d) => d.name))
+                    )
+                  }
+                >
+                  Select pending ({dumpsNeedingStage3.length})
+                </Button>
+              </div>
+              <div className="max-h-36 space-y-1 overflow-y-auto rounded-md border p-2">
+                {dumpsOldestFirst.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No dumps</p>
+                ) : (
+                  dumpsOldestFirst.map((d) => (
+                    <label
+                      key={d.name}
+                      className="flex min-h-9 items-center gap-2 text-xs"
+                    >
+                      <Checkbox
+                        checked={selectedStage3.has(d.name)}
+                        onCheckedChange={() =>
+                          setSelectedStage3((prev) =>
+                            toggleInSet(prev, d.name)
+                          )
+                        }
+                      />
+                      <span className="min-w-0 truncate">
+                        {d.label || d.name}
+                      </span>
+                    </label>
+                  ))
+                )}
+              </div>
+            </BatchDisclosure>
             <Button
               className="min-h-11 w-full"
-              disabled={busy || !dumpName}
-              onClick={() =>
+              disabled={
+                busy ||
+                (batchOpen3 ? selectedStage3.size === 0 : !dumpName)
+              }
+              onClick={() => {
+                if (batchOpen3) {
+                  start(
+                    "/api/pipeline/stage3-batch",
+                    {
+                      dumpNames: dumpsOldestFirst
+                        .map((d) => d.name)
+                        .filter((n) => selectedStage3.has(n)),
+                      limit: Number(stage3Limit) || undefined,
+                      force,
+                      skipGenerate,
+                    },
+                    `Batch stage3 (${selectedStage3.size})`
+                  );
+                  return;
+                }
                 start(
                   "/api/pipeline/stage3",
                   {
@@ -615,11 +930,13 @@ export function PipelineBar({
                     skipGenerate,
                   },
                   "Stage 3"
-                )
-              }
+                );
+              }}
             >
               <Bot data-icon="inline-start" />
-              Run
+              {batchOpen3
+                ? `Run selected (${selectedStage3.size})`
+                : "Run"}
             </Button>
           </StageCard>
         </div>

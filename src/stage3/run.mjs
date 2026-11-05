@@ -26,6 +26,8 @@ import {
   upsertDump,
   refreshDumpSummaries,
   nowIso,
+  findJobTwin,
+  copyJobTriageFromTwin,
 } from "../db.mjs";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -170,6 +172,39 @@ try {
       `\n[${i + 1}/${toEval.length}] ${job.id} — ${job.title} @ ${job.company}`
     );
     try {
+      if (!force) {
+        const twin = findJobTwin(db, {
+          title: job.title,
+          company: job.company,
+          jobId: job.id,
+          excludeDumpId: dumpId,
+          excludeJobId: job.id,
+          needDecision: true,
+        });
+        if (twin) {
+          const info = copyJobTriageFromTwin(db, dumpId, job.id, twin);
+          console.log(
+            `→ duplicate (reused eval from ${info.twinJobId}${
+              info.twinDump ? ` @ ${info.twinDump}` : ""
+            } · ${info.decision})`
+          );
+          results.push({
+            id: job.id,
+            title: job.title,
+            company: job.company,
+            decision: twin.decision,
+            fitScore: twin.fit_score,
+            confidence: twin.confidence,
+            qualify: job.qualify,
+            evaluation: null,
+            materials: null,
+            error: `duplicate_of:${twin.job_id}`,
+            skipReason: "duplicate",
+          });
+          continue;
+        }
+      }
+
       const evaluation = await evaluateJob({
         claude,
         cache,

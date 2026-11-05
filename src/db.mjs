@@ -7,8 +7,11 @@ import Database from "better-sqlite3";
 import { existsSync, mkdirSync, copyFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { jobFingerprint, normalizeJobText } from "./job-fingerprint.mjs";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
+
+export { jobFingerprint, normalizeJobText };
 
 export function defaultDbPath() {
   return join(root, "data", "job-triage.sqlite");
@@ -352,6 +355,91 @@ export function updateJobTriage(db, dumpId, jobId, triage) {
     stage3_error: triage.error ?? triage.stage3Error ?? null,
     stamp,
   });
+}
+
+/**
+ * Find another job row that is the same posting (same job_id or title+company twin)
+ * with usable detail or triage data.
+ *
+ * @param {import('better-sqlite3').Database} db
+ * @param {{ title?: string|null, company?: string|null, jobId?: string|null, excludeDumpId: number, excludeJobId: string, needDescription?: boolean, needDecision?: boolean }} opts
+ * @returns {Record<string, unknown>|null}
+ */
+export function findJobTwin(db, opts) {
+  const excludeDumpId = opts.excludeDumpId;
+  const excludeJobId = String(opts.excludeJobId);
+  const needDescription = Boolean(opts.needDescription);
+  const needDecision = Boolean(opts.needDecision);
+  const fp = jobFingerprint(opts.title, opts.company);
+  const jobId = opts.jobId != null ? String(opts.jobId) : excludeJobId;
+
+  const rows = db
+    .prepare(
+      `
+    SELECT j.*, d.basename AS dump_basename, d.parsed_at AS dump_parsed_at
+    FROM jobs j
+    JOIN dumps d ON d.id = j.dump_id
+    WHERE NOT (j.dump_id = @exclude_dump AND j.job_id = @exclude_job)
+    ORDER BY
+      COALESCE(j.detail_fetched_at, j.tracked_at, d.parsed_at, d.dumped_at) ASC
+  `
+    )
+    .all({ exclude_dump: excludeDumpId, exclude_job: excludeJobId });
+
+  for (const row of rows) {
+    const sameId = String(row.job_id) === jobId;
+    const twinFp = jobFingerprint(row.title, row.company);
+    const sameFp = Boolean(fp && twinFp && fp === twinFp);
+    if (!sameId && !sameFp) continue;
+
+    if (needDescription) {
+      const desc = row.description;
+      if (!(typeof desc === "string" && desc.trim().length > 0)) continue;
+    }
+    if (needDecision) {
+      if (!row.decision) continue;
+    }
+    return row;
+  }
+  return null;
+}
+
+/** Copy description / apply_url / paths from twin onto target job. */
+export function copyJobDetailFromTwin(db, dumpId, jobId, twinRow) {
+  const stamp = nowIso();
+  updateJobDetail(db, dumpId, jobId, {
+    status: "ok",
+    description: twinRow.description ?? null,
+    error: null,
+    htmlPath: twinRow.html_path ?? null,
+    fetchedAt: twinRow.detail_fetched_at || stamp,
+    title: twinRow.title ?? null,
+    company: twinRow.company ?? null,
+    applyUrl: twinRow.apply_url ?? null,
+  });
+  return {
+    twinJobId: String(twinRow.job_id),
+    twinDump: twinRow.dump_basename ?? null,
+  };
+}
+
+/** Copy Stage 3 triage fields from twin onto target job. */
+export function copyJobTriageFromTwin(db, dumpId, jobId, twinRow) {
+  const marker = `duplicate_of:${twinRow.job_id}`;
+  updateJobTriage(db, dumpId, jobId, {
+    decision: twinRow.decision ?? null,
+    fitScore: twinRow.fit_score ?? null,
+    confidence: twinRow.confidence ?? null,
+    qualify: parseJsonCol(twinRow.qualify_json),
+    evaluation: parseJsonCol(twinRow.evaluation_json),
+    materials: parseJsonCol(twinRow.materials_json),
+    error: marker,
+  });
+  return {
+    twinJobId: String(twinRow.job_id),
+    twinDump: twinRow.dump_basename ?? null,
+    decision: twinRow.decision ?? null,
+  };
 }
 
 const TRACK_STATUSES = new Set(["todo", "applied", "waiting", "closed"]);

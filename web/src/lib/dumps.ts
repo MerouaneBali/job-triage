@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
+import { jobFingerprint } from "@/lib/job-fingerprint";
 import Database from "better-sqlite3";
 import { dataPaths } from "./paths";
 import type { DumpDetail, DumpSummary, HtmlDump, JobRow } from "./types";
@@ -286,6 +287,83 @@ export function updateJobTrackFields(
       .prepare(`SELECT * FROM jobs WHERE dump_id = ? AND job_id = ?`)
       .get(dump.id, String(jobId)) as Record<string, unknown>;
     return rowToJob(updated);
+  } finally {
+    db.close();
+  }
+}
+
+function trackProgress(status: JobRow["trackStatus"]): number {
+  if (status === "closed") return 4;
+  if (status === "waiting") return 3;
+  if (status === "applied") return 2;
+  if (status === "todo") return 1;
+  return 0;
+}
+
+function preferInboxJob(a: JobRow, b: JobRow): JobRow {
+  const tp = trackProgress(a.trackStatus) - trackProgress(b.trackStatus);
+  if (tp !== 0) return tp > 0 ? a : b;
+  const fs = (a.fitScore ?? 0) - (b.fitScore ?? 0);
+  if (fs !== 0) return fs > 0 ? a : b;
+  const ta = a.trackedAt || a.appliedAt || "";
+  const tb = b.trackedAt || b.appliedAt || "";
+  if (ta !== tb) return ta > tb ? a : b;
+  return a;
+}
+
+/** Apply/maybe jobs across all dumps, deduped by job_id then title+company. */
+export function loadInboxJobs(): {
+  jobs: JobRow[];
+  totalRaw: number;
+  dumpsTouched: number;
+} {
+  const { db: dbPath } = dataPaths();
+  if (!existsSync(dbPath)) return { jobs: [], totalRaw: 0, dumpsTouched: 0 };
+  const db = openAppDb();
+  try {
+    const rows = db
+      .prepare(
+        `
+      SELECT j.*, d.basename AS dump_basename
+      FROM jobs j
+      JOIN dumps d ON d.id = j.dump_id
+      WHERE j.decision IN ('apply', 'maybe')
+      ORDER BY COALESCE(d.updated_at, d.parsed_at, d.dumped_at) DESC
+    `
+      )
+      .all() as Array<Record<string, unknown>>;
+
+    const mapped: JobRow[] = rows.map((row) => ({
+      ...rowToJob(row),
+      dumpName: (row.dump_basename as string) || null,
+    }));
+
+    const byId = new Map<string, JobRow>();
+    for (const job of mapped) {
+      const id = String(job.id);
+      const prev = byId.get(id);
+      byId.set(id, prev ? preferInboxJob(prev, job) : job);
+    }
+
+    const byFp = new Map<string, JobRow>();
+    const noFp: JobRow[] = [];
+    for (const job of byId.values()) {
+      const fp = jobFingerprint(job.title, job.company);
+      if (!fp) {
+        noFp.push(job);
+        continue;
+      }
+      const prev = byFp.get(fp);
+      byFp.set(fp, prev ? preferInboxJob(prev, job) : job);
+    }
+
+    const jobs = [...byFp.values(), ...noFp].sort(
+      (a, b) => (b.fitScore ?? 0) - (a.fitScore ?? 0)
+    );
+    const dumpsTouched = new Set(
+      mapped.map((j) => j.dumpName).filter(Boolean)
+    ).size;
+    return { jobs, totalRaw: mapped.length, dumpsTouched };
   } finally {
     db.close();
   }

@@ -75,7 +75,11 @@ export type JobRow = {
   source?: string | null;
   /** Company/ATS apply URL when known; else fall back to LinkedIn `url`. */
   applyUrl?: string | null;
+  /** Dump stem when loaded from All-dumps inbox. */
+  dumpName?: string | null;
 };
+
+export const ALL_DUMPS = "__all__";
 
 export type DumpSummary = {
   name: string;
@@ -113,7 +117,13 @@ export type HtmlDump = {
   size: number;
 };
 
-export type PipelineKind = "parse" | "fetch" | "stage3";
+export type PipelineKind =
+  | "parse"
+  | "fetch"
+  | "stage3"
+  | "parse-batch"
+  | "fetch-batch"
+  | "stage3-batch";
 
 export type PipelineJob = {
   id: string;

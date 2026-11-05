@@ -25,6 +25,8 @@ import {
   relativeDetailPath,
   nowIso,
   jobRowToApi,
+  findJobTwin,
+  copyJobDetailFromTwin,
 } from "../db.mjs";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -235,6 +237,46 @@ if (!pending.length) {
   process.exit(0);
 }
 
+/** Copy from title/company (or same job_id) twins before launching Chromium. */
+const needBrowser = [];
+let copied = 0;
+if (!force) {
+  for (const job of pending) {
+    const twin = findJobTwin(db, {
+      title: job.title,
+      company: job.company,
+      jobId: job.id,
+      excludeDumpId: dump.id,
+      excludeJobId: job.id,
+      needDescription: true,
+    });
+    if (twin) {
+      const info = copyJobDetailFromTwin(db, dump.id, job.id, twin);
+      copied += 1;
+      console.log(
+        `→ duplicate ${job.id} (copied from ${info.twinJobId}${
+          info.twinDump ? ` @ ${info.twinDump}` : ""
+        })`
+      );
+      continue;
+    }
+    needBrowser.push(job);
+  }
+  pending = needBrowser;
+  if (copied) {
+    upsertDump(db, { basename, fetched_at: nowIso() });
+    console.log(`Copied ${copied} from twins · remaining to fetch: ${pending.length}`);
+  }
+}
+
+if (!pending.length) {
+  const refreshedEarly = listJobsForDump(db, dump.id);
+  const okEarly = refreshedEarly.filter((j) => j.detail_status === "ok").length;
+  db.close();
+  console.log(`\nDone. ${okEarly}/${refreshedEarly.length} ok → dump ${basename} (all from twins)`);
+  process.exit(0);
+}
+
 const browser = await chromium.launch({
   headless,
   proxy: parseProxy(proxyUrl),
@@ -253,6 +295,28 @@ try {
     index += 1;
     console.log(`\n[${index}/${pending.length}] ${job.id} — ${job.title || "?"}`);
     console.log(job.url);
+
+    // Re-check twin in case an earlier fetch in this run filled one
+    if (!force) {
+      const twin = findJobTwin(db, {
+        title: job.title,
+        company: job.company,
+        jobId: job.id,
+        excludeDumpId: dump.id,
+        excludeJobId: job.id,
+        needDescription: true,
+      });
+      if (twin) {
+        const info = copyJobDetailFromTwin(db, dump.id, job.id, twin);
+        upsertDump(db, { basename, fetched_at: nowIso() });
+        console.log(
+          `→ duplicate (copied from ${info.twinJobId}${
+            info.twinDump ? ` @ ${info.twinDump}` : ""
+          })`
+        );
+        continue;
+      }
+    }
 
     let status = "ok";
     let error = null;

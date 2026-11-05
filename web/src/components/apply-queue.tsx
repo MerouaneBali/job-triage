@@ -16,7 +16,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { ApplyChannel, JobRow, TrackStatus } from "@/lib/types";
+import {
+  ALL_DUMPS,
+  type ApplyChannel,
+  type JobRow,
+  type TrackStatus,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {
   Briefcase,
@@ -178,7 +183,11 @@ export function ApplyQueue({
       trackNote?: string | null;
     },
   ) {
-    if (!dumpName) {
+    const targetDump =
+      dumpName && dumpName !== ALL_DUMPS
+        ? dumpName
+        : job.dumpName || null;
+    if (!targetDump) {
       toast.error("Select a dump first");
       return;
     }
@@ -189,7 +198,7 @@ export function ApplyQueue({
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ dumpName, ...patch }),
+          body: JSON.stringify({ dumpName: targetDump, ...patch }),
         },
       );
       const data = (await res.json()) as { job?: JobRow; error?: string };
@@ -307,6 +316,11 @@ export function ApplyQueue({
                     <p className="text-sm text-muted-foreground">
                       {[job.company, job.location].filter(Boolean).join(" · ")}
                     </p>
+                    {job.dumpName ? (
+                      <p className="truncate font-mono text-[10px] text-muted-foreground/80">
+                        {job.dumpName}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
 

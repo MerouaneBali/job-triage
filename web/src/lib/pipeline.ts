@@ -249,3 +249,202 @@ export function startStage3(
   if (opts.skipGenerate) args.push("--skip-generate");
   return startChild("stage3", args, "stage3");
 }
+
+type BatchItem = { label: string; args: string[] };
+
+function assertIdle() {
+  const currentActive = getActiveId();
+  if (currentActive) {
+    const active = jobs.get(currentActive);
+    if (active?.status === "running") {
+      const err = new Error("A pipeline job is already running");
+      (err as Error & { status: number }).status = 409;
+      throw err;
+    }
+  }
+}
+
+function spawnLogged(
+  job: InternalJob,
+  args: string[],
+  env: NodeJS.ProcessEnv
+): Promise<number> {
+  const root = getRepoRoot();
+  return new Promise((resolvePromise) => {
+    const child = spawn(process.execPath, args, {
+      cwd: root,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    job.child = child;
+    emit(job, {
+      type: "log",
+      line: `$ node ${args.join(" ")}`,
+      stream: "stdout",
+    });
+    const onChunk = (stream: "stdout" | "stderr") => (buf: Buffer) => {
+      const text = buf.toString("utf8");
+      for (const line of text.split(/\r?\n/)) {
+        if (line.length === 0) continue;
+        emit(job, { type: "log", line, stream });
+      }
+    };
+    child.stdout.on("data", onChunk("stdout"));
+    child.stderr.on("data", onChunk("stderr"));
+    child.on("error", (err) => {
+      emit(job, {
+        type: "log",
+        line: `spawn error: ${err.message}`,
+        stream: "stderr",
+      });
+      resolvePromise(1);
+    });
+    child.on("close", (code) => {
+      job.child = null;
+      resolvePromise(code ?? 1);
+    });
+  });
+}
+
+/** Run several CLI invocations sequentially under one PipelineJob / SSE stream. */
+function startBatch(
+  kind: PipelineKind,
+  phase: string,
+  items: BatchItem[]
+): PipelineJob {
+  assertIdle();
+  if (!items.length) {
+    throw Object.assign(new Error("Nothing to batch"), { status: 400 });
+  }
+
+  loadRepoEnv();
+  const id = randomUUID();
+  const job: InternalJob = {
+    id,
+    kind,
+    startedAt: new Date().toISOString(),
+    status: "running",
+    exitCode: null,
+    error: null,
+    logs: [],
+    phase,
+    child: null,
+    listeners: new Set(),
+  };
+  jobs.set(id, job);
+  setActiveId(id);
+
+  const env = { ...process.env };
+  if (
+    env.PLAYWRIGHT_BROWSERS_PATH &&
+    /cursor-sandbox-cache|Cursor\/AgentStores/i.test(env.PLAYWRIGHT_BROWSERS_PATH)
+  ) {
+    delete env.PLAYWRIGHT_BROWSERS_PATH;
+  }
+
+  emit(job, { type: "phase", phase });
+  emit(job, {
+    type: "log",
+    line: `Batch ${phase}: ${items.length} item(s)`,
+    stream: "stdout",
+  });
+
+  void (async () => {
+    let failures = 0;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]!;
+      emit(job, {
+        type: "phase",
+        phase: `${phase} ${i + 1}/${items.length}`,
+      });
+      emit(job, {
+        type: "log",
+        line: `\n=== ${item.label} (${i + 1}/${items.length}) ===`,
+        stream: "stdout",
+      });
+      const code = await spawnLogged(job, item.args, env);
+      if (code !== 0) {
+        failures += 1;
+        emit(job, {
+          type: "log",
+          line: `… exited ${code} (continuing batch)`,
+          stream: "stderr",
+        });
+      }
+    }
+    const exitCode = failures === 0 ? 0 : failures === items.length ? 1 : 0;
+    if (failures && exitCode === 0) {
+      emit(job, {
+        type: "log",
+        line: `Batch finished with ${failures}/${items.length} failures (overall ok)`,
+        stream: "stderr",
+      });
+    }
+    emit(job, { type: "done", exitCode });
+    finishActive(id);
+  })();
+
+  return publicJob(job);
+}
+
+export function startBatchParse(htmlNames: string[]): PipelineJob {
+  const { dumps } = dataPaths();
+  const items: BatchItem[] = [];
+  for (const name of htmlNames) {
+    const htmlPath = join(dumps, name);
+    if (!existsSync(htmlPath)) {
+      throw Object.assign(new Error(`HTML dump not found: ${name}`), {
+        status: 404,
+      });
+    }
+    items.push({
+      label: name,
+      args: [join("src", "stage1", "parse-jobs.mjs"), htmlPath],
+    });
+  }
+  return startBatch("parse-batch", "batch-parse", items);
+}
+
+export function startBatchFetch(
+  dumpNames: string[],
+  opts: {
+    limit?: number;
+    noPause?: boolean;
+    headless?: boolean;
+    force?: boolean;
+  } = {}
+): PipelineJob {
+  const items: BatchItem[] = [];
+  for (const dumpName of dumpNames) {
+    const stem = dumpName.replace(/\.json$/i, "");
+    if (!stem) continue;
+    const args = [join("src", "stage2", "fetch-details.mjs"), stem];
+    if (opts.limit != null && Number.isFinite(opts.limit) && opts.limit > 0) {
+      args.push("--limit", String(Math.floor(opts.limit)));
+    }
+    if (opts.noPause !== false) args.push("--no-pause");
+    if (opts.headless) args.push("--headless");
+    if (opts.force) args.push("--force");
+    items.push({ label: stem, args });
+  }
+  return startBatch("fetch-batch", "batch-fetch", items);
+}
+
+export function startBatchStage3(
+  dumpNames: string[],
+  opts: { limit?: number; force?: boolean; skipGenerate?: boolean } = {}
+): PipelineJob {
+  const items: BatchItem[] = [];
+  for (const dumpName of dumpNames) {
+    const stem = dumpName.replace(/\.json$/i, "");
+    if (!stem) continue;
+    const args = [join("src", "stage3", "run.mjs"), stem];
+    if (opts.limit != null && Number.isFinite(opts.limit) && opts.limit > 0) {
+      args.push("--limit", String(Math.floor(opts.limit)));
+    }
+    if (opts.force) args.push("--force");
+    if (opts.skipGenerate) args.push("--skip-generate");
+    items.push({ label: stem, args });
+  }
+  return startBatch("stage3-batch", "batch-stage3", items);
+}

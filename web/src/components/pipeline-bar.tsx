@@ -209,8 +209,9 @@ export function PipelineBar({
 }: Props) {
   const [htmlDumps, setHtmlDumps] = useState<HtmlDump[]>([]);
   const [htmlName, setHtmlName] = useState<string>("");
-  const [fetchLimit, setFetchLimit] = useState("5");
-  const [stage3Limit, setStage3Limit] = useState("3");
+  /** Empty = no cap (process all pending in the dump / each batch item). */
+  const [fetchLimit, setFetchLimit] = useState("");
+  const [stage3Limit, setStage3Limit] = useState("");
   const [force, setForce] = useState(false);
   const [skipGenerate, setSkipGenerate] = useState(false);
   const [noPause, setNoPause] = useState(true);
@@ -649,12 +650,12 @@ export function PipelineBar({
               </label>
               <Input
                 id="fetch-limit"
-                className="min-h-11 w-20"
+                className="min-h-11 w-24"
                 inputMode="numeric"
                 value={fetchLimit}
                 onChange={(e) => setFetchLimit(e.target.value)}
-                placeholder="limit"
-                aria-label="Fetch limit"
+                placeholder="all"
+                aria-label="Fetch limit (optional; blank = all pending)"
               />
             </div>
             <div className="flex flex-col gap-2">
@@ -814,12 +815,12 @@ export function PipelineBar({
               </label>
               <Input
                 id="stage3-limit"
-                className="min-h-11 w-20"
+                className="min-h-11 w-24"
                 inputMode="numeric"
                 value={stage3Limit}
                 onChange={(e) => setStage3Limit(e.target.value)}
-                placeholder="limit"
-                aria-label="Stage 3 limit"
+                placeholder="all"
+                aria-label="Stage 3 limit (optional; blank = all pending)"
               />
             </div>
             <div className="flex flex-col gap-2">
@@ -943,11 +944,44 @@ export function PipelineBar({
       ) : null}
 
       {showLogChrome ? (
-        logOpen ? (
+        <>
+          {/* Collapsed chip — stays mounted for exit animation */}
+          <button
+            type="button"
+            className={cn(
+              "fixed z-50 flex max-w-[min(18rem,calc(100vw-1.5rem))] items-center gap-2 rounded-full border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm text-zinc-100 shadow-lg",
+              "right-4 bottom-20 md:right-4 md:bottom-20",
+              "origin-bottom-right transition-[opacity,transform] duration-300 ease-out",
+              logOpen
+                ? "pointer-events-none scale-90 translate-y-2 opacity-0"
+                : "scale-100 translate-y-0 opacity-100"
+            )}
+            onClick={() => setLogOpen(true)}
+            aria-label="Open pipeline log"
+            aria-hidden={logOpen}
+            tabIndex={logOpen ? -1 : 0}
+          >
+            {busy ? (
+              <Loader2 className="size-4 shrink-0 animate-spin text-amber-400" />
+            ) : (
+              <Terminal className="size-4 shrink-0 text-zinc-400" />
+            )}
+            <span className="min-w-0 truncate">{fabLabel}</span>
+          </button>
+
+          {/* Expanded panel */}
           <div
-            className="fixed inset-x-3 z-50 flex max-h-[50vh] flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950 shadow-xl bottom-24 md:inset-x-auto md:bottom-4 md:right-4 md:w-[min(28rem,calc(100vw-2rem))]"
+            className={cn(
+              "fixed z-50 flex max-h-[50vh] flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950 shadow-xl",
+              "left-3 right-4 bottom-20 md:left-auto md:w-[min(28rem,calc(100vw-2rem))] md:right-4 md:bottom-20",
+              "origin-bottom-right transition-[opacity,transform] duration-300 ease-out",
+              logOpen
+                ? "pointer-events-auto scale-100 translate-y-0 opacity-100"
+                : "pointer-events-none scale-95 translate-y-3 opacity-0"
+            )}
             role="dialog"
             aria-label="Pipeline log"
+            aria-hidden={!logOpen}
           >
             <div className="flex shrink-0 items-center gap-2 border-b border-zinc-800 px-3 py-2 text-zinc-300">
               {busy ? (
@@ -990,21 +1024,7 @@ export function PipelineBar({
               {logs.length ? logs.join("\n") : busy ? "Waiting for output…" : ""}
             </div>
           </div>
-        ) : (
-          <button
-            type="button"
-            className="fixed z-50 flex max-w-[min(18rem,calc(100vw-1.5rem))] items-center gap-2 rounded-full border bg-card px-4 py-3 text-sm shadow-lg bottom-24 right-3 md:bottom-4 md:right-4"
-            onClick={() => setLogOpen(true)}
-            aria-label="Open pipeline log"
-          >
-            {busy ? (
-              <Loader2 className="size-4 shrink-0 animate-spin text-amber-600" />
-            ) : (
-              <Terminal className="size-4 shrink-0 text-muted-foreground" />
-            )}
-            <span className="min-w-0 truncate">{fabLabel}</span>
-          </button>
-        )
+        </>
       ) : null}
     </>
   );

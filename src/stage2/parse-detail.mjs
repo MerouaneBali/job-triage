@@ -186,9 +186,54 @@ function fromTitleTag(html) {
   return { title: raw.replace(/\s*\|\s*LinkedIn$/i, "") || null, company: null };
 }
 
+function decodeHref(s) {
+  return String(s)
+    .replace(/&amp;/g, "&")
+    .replace(/&#x2F;/gi, "/")
+    .replace(/&#47;/g, "/");
+}
+
+function isLinkedInHost(url) {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host === "linkedin.com" || host.endsWith(".linkedin.com") || host.includes("licdn.com");
+  } catch {
+    return true;
+  }
+}
+
+/** Company / ATS apply URL when LinkedIn exposes it (often missing on guest HTML). */
+export function extractApplyUrl(html) {
+  const patterns = [
+    /"(?:externalApplicationUrl|companyApplyUrl|applyUrl|applicationUrl)"\s*:\s*"(https?:\\\/\\\/[^"]+|https?:\/\/[^"]+)"/i,
+    /(?:externalApplicationUrl|companyApplyUrl|applyUrl)\s*[:=]\s*["'](https?:\/\/[^"']+)["']/i,
+  ];
+  for (const re of patterns) {
+    const m = html.match(re);
+    if (m?.[1]) {
+      const url = decodeHref(m[1].replace(/\\\//g, "/"));
+      if (/^https?:\/\//i.test(url) && !isLinkedInHost(url)) return url;
+    }
+  }
+  // Rare: offsite apply <a href="https://company...">
+  for (const m of html.matchAll(
+    /href=["'](https?:\/\/[^"']+)["'][^>]*(?:offsite|external|company-apply|jobs_apply)/gi
+  )) {
+    const url = decodeHref(m[1]);
+    if (!isLinkedInHost(url)) return url;
+  }
+  for (const m of html.matchAll(
+    /(?:offsite|external|company-apply|jobs_apply)[^>]*href=["'](https?:\/\/[^"']+)["']/gi
+  )) {
+    const url = decodeHref(m[1]);
+    if (!isLinkedInHost(url)) return url;
+  }
+  return null;
+}
+
 /**
  * @param {string} html
- * @returns {{ title: string|null, company: string|null, description: string|null, challenged: boolean }}
+ * @returns {{ title: string|null, company: string|null, description: string|null, applyUrl: string|null, challenged: boolean }}
  */
 export function parseDetailHtml(html) {
   const challenged = looksLikeChallenge(html);
@@ -211,6 +256,7 @@ export function parseDetailHtml(html) {
     title,
     company,
     description,
+    applyUrl: extractApplyUrl(html),
     // Only flag challenge when we lack a usable description
     challenged: !description && (challenged || looksLikeChallenge(html)),
   };

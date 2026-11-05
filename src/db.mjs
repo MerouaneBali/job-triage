@@ -87,6 +87,41 @@ function migrateSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_jobs_decision ON jobs(decision);
     CREATE INDEX IF NOT EXISTS idx_dumps_updated ON dumps(updated_at);
   `);
+
+  ensureJobsTrackColumns(db);
+}
+
+/** Additive columns for application tracking (safe on existing DBs). */
+export function ensureJobsTrackColumns(db) {
+  const cols = new Set(
+    db.prepare(`PRAGMA table_info(jobs)`).all().map((r) => r.name)
+  );
+  const add = (name, ddl) => {
+    if (!cols.has(name)) {
+      db.exec(`ALTER TABLE jobs ADD COLUMN ${name} ${ddl}`);
+      cols.add(name);
+    }
+  };
+  add("track_status", "TEXT");
+  add("apply_channel", "TEXT");
+  add("track_note", "TEXT");
+  add("tracked_at", "TEXT");
+  add("applied_at", "TEXT");
+  add("source", "TEXT");
+  add("apply_url", "TEXT");
+
+  db.exec(`
+    UPDATE jobs SET source = 'linkedin_job' WHERE source IS NULL OR source = '';
+    UPDATE jobs
+    SET
+      track_status = 'todo',
+      tracked_at = COALESCE(tracked_at, '${nowIso()}')
+    WHERE decision IN ('apply', 'maybe')
+      AND (track_status IS NULL OR track_status = '');
+  `);
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_jobs_track_status ON jobs(track_status)`
+  );
 }
 
 /** Copy Claude cache rows from legacy path if new DB is empty of cache. */
@@ -216,10 +251,10 @@ export function upsertJobCard(db, dumpId, job) {
   db.prepare(`
     INSERT INTO jobs (
       dump_id, job_id, title, company, location, salary, posted, posted_raw, posted_at,
-      easy_apply, early_applicant, verified, logo_url, url
+      easy_apply, early_applicant, verified, logo_url, url, source
     ) VALUES (
       @dump_id, @job_id, @title, @company, @location, @salary, @posted, @posted_raw, @posted_at,
-      @easy_apply, @early_applicant, @verified, @logo_url, @url
+      @easy_apply, @early_applicant, @verified, @logo_url, @url, @source
     )
     ON CONFLICT(dump_id, job_id) DO UPDATE SET
       title = excluded.title,
@@ -233,7 +268,8 @@ export function upsertJobCard(db, dumpId, job) {
       early_applicant = excluded.early_applicant,
       verified = excluded.verified,
       logo_url = excluded.logo_url,
-      url = excluded.url
+      url = excluded.url,
+      source = COALESCE(jobs.source, excluded.source)
   `).run({
     dump_id: dumpId,
     job_id: String(job.id),
@@ -249,6 +285,7 @@ export function upsertJobCard(db, dumpId, job) {
     verified: job.verified ? 1 : 0,
     logo_url: job.logoUrl ?? null,
     url: job.url ?? null,
+    source: job.source ?? "linkedin_job",
   });
 }
 
@@ -261,7 +298,8 @@ export function updateJobDetail(db, dumpId, jobId, detail) {
       html_path = @html_path,
       detail_fetched_at = @detail_fetched_at,
       title = COALESCE(@title, title),
-      company = COALESCE(@company, company)
+      company = COALESCE(@company, company),
+      apply_url = COALESCE(@apply_url, apply_url)
     WHERE dump_id = @dump_id AND job_id = @job_id
   `).run({
     dump_id: dumpId,
@@ -273,10 +311,13 @@ export function updateJobDetail(db, dumpId, jobId, detail) {
     detail_fetched_at: detail.fetchedAt ?? null,
     title: detail.title ?? null,
     company: detail.company ?? null,
+    apply_url: detail.applyUrl ?? null,
   });
 }
 
 export function updateJobTriage(db, dumpId, jobId, triage) {
+  const decision = triage.decision ?? null;
+  const stamp = nowIso();
   db.prepare(`
     UPDATE jobs SET
       decision = @decision,
@@ -285,12 +326,22 @@ export function updateJobTriage(db, dumpId, jobId, triage) {
       qualify_json = @qualify_json,
       evaluation_json = @evaluation_json,
       materials_json = @materials_json,
-      stage3_error = @stage3_error
+      stage3_error = @stage3_error,
+      track_status = CASE
+        WHEN @decision IN ('apply', 'maybe') AND (track_status IS NULL OR track_status = '')
+          THEN 'todo'
+        ELSE track_status
+      END,
+      tracked_at = CASE
+        WHEN @decision IN ('apply', 'maybe') AND (track_status IS NULL OR track_status = '')
+          THEN @stamp
+        ELSE tracked_at
+      END
     WHERE dump_id = @dump_id AND job_id = @job_id
   `).run({
     dump_id: dumpId,
     job_id: String(jobId),
-    decision: triage.decision ?? null,
+    decision,
     fit_score: triage.fitScore ?? null,
     confidence: triage.confidence ?? null,
     qualify_json: triage.qualify ? JSON.stringify(triage.qualify) : null,
@@ -299,7 +350,82 @@ export function updateJobTriage(db, dumpId, jobId, triage) {
       : null,
     materials_json: triage.materials ? JSON.stringify(triage.materials) : null,
     stage3_error: triage.error ?? triage.stage3Error ?? null,
+    stamp,
   });
+}
+
+const TRACK_STATUSES = new Set(["todo", "applied", "waiting", "closed"]);
+const APPLY_CHANNELS = new Set(["easy_apply", "external", "message"]);
+
+/**
+ * Update user application tracking for a job within a dump.
+ * @returns {object|null} updated API job row
+ */
+export function updateJobTrack(db, dumpId, jobId, patch) {
+  const row = db
+    .prepare(`SELECT * FROM jobs WHERE dump_id = ? AND job_id = ?`)
+    .get(dumpId, String(jobId));
+  if (!row) return null;
+
+  let trackStatus =
+    patch.trackStatus !== undefined ? patch.trackStatus : row.track_status;
+  if (trackStatus != null && trackStatus !== "" && !TRACK_STATUSES.has(trackStatus)) {
+    throw Object.assign(new Error(`Invalid trackStatus: ${trackStatus}`), {
+      status: 400,
+    });
+  }
+  if (trackStatus === "") trackStatus = null;
+
+  let applyChannel =
+    patch.applyChannel !== undefined ? patch.applyChannel : row.apply_channel;
+  if (
+    applyChannel != null &&
+    applyChannel !== "" &&
+    !APPLY_CHANNELS.has(applyChannel)
+  ) {
+    throw Object.assign(new Error(`Invalid applyChannel: ${applyChannel}`), {
+      status: 400,
+    });
+  }
+  if (applyChannel === "") applyChannel = null;
+
+  const trackNote =
+    patch.trackNote !== undefined ? patch.trackNote : row.track_note;
+
+  const stamp = nowIso();
+  let appliedAt = row.applied_at;
+  if (trackStatus === "applied" && row.track_status !== "applied") {
+    appliedAt = stamp;
+  }
+  if (patch.appliedAt !== undefined) appliedAt = patch.appliedAt;
+
+  let trackedAt = row.tracked_at || stamp;
+  if (trackStatus && trackStatus !== row.track_status) {
+    trackedAt = stamp;
+  }
+
+  db.prepare(`
+    UPDATE jobs SET
+      track_status = @track_status,
+      apply_channel = @apply_channel,
+      track_note = @track_note,
+      tracked_at = @tracked_at,
+      applied_at = @applied_at
+    WHERE dump_id = @dump_id AND job_id = @job_id
+  `).run({
+    dump_id: dumpId,
+    job_id: String(jobId),
+    track_status: trackStatus,
+    apply_channel: applyChannel,
+    track_note: trackNote ?? null,
+    tracked_at: trackedAt,
+    applied_at: appliedAt,
+  });
+
+  const updated = db
+    .prepare(`SELECT * FROM jobs WHERE dump_id = ? AND job_id = ?`)
+    .get(dumpId, String(jobId));
+  return jobRowToApi(updated);
 }
 
 export function listJobsForDump(db, dumpId) {
@@ -361,6 +487,13 @@ export function jobRowToApi(row) {
     qualifyReasons: parseJsonCol(row.qualify_json)?.reasons ?? null,
     recommendation: parseJsonCol(row.evaluation_json)?.recommendation ?? null,
     stage3Error: row.stage3_error,
+    trackStatus: row.track_status ?? null,
+    applyChannel: row.apply_channel ?? null,
+    trackNote: row.track_note ?? null,
+    trackedAt: row.tracked_at ?? null,
+    appliedAt: row.applied_at ?? null,
+    source: row.source ?? "linkedin_job",
+    applyUrl: row.apply_url ?? null,
   };
 }
 

@@ -136,6 +136,7 @@ function saveDetail(db, dumpId, record) {
     fetchedAt: record.fetchedAt,
     title: record.title,
     company: record.company,
+    applyUrl: record.applyUrl ?? null,
   });
 }
 
@@ -184,9 +185,12 @@ if (reparseOnly) {
         fetchedAt: nowIso(),
         title: parsed.title || job.title,
         company: job.company || parsed.company,
+        applyUrl: parsed.applyUrl,
       });
       ok += 1;
-      console.log(`✓ ${job.id} (${parsed.description.length} chars)`);
+      console.log(
+        `✓ ${job.id} (${parsed.description.length} chars)${parsed.applyUrl ? " · applyUrl" : ""}`
+      );
     } else {
       saveDetail(db, dump.id, {
         id: job.id,
@@ -199,6 +203,7 @@ if (reparseOnly) {
         fetchedAt: nowIso(),
         title: job.title || parsed.title,
         company: job.company || parsed.company,
+        applyUrl: parsed.applyUrl,
       });
       missing += 1;
       console.log(`✗ ${job.id} — no description`);
@@ -254,6 +259,7 @@ try {
     let description = null;
     let title = job.title || null;
     let company = job.company || null;
+    let applyUrl = null;
     const absHtml = join(detailsHtmlDir, `${job.id}.html`);
     const rel = relativeDetailPath(job.id);
 
@@ -302,6 +308,7 @@ try {
       }
 
       writeFileSync(absHtml, html, "utf8");
+      applyUrl = parsed.applyUrl;
 
       if (parsed.description) {
         description = parsed.description;
@@ -329,9 +336,12 @@ try {
       fetchedAt: nowIso(),
       title,
       company,
+      applyUrl,
     });
     upsertDump(db, { basename, fetched_at: nowIso() });
-    console.log(`→ ${status}${description ? ` (${description.length} chars)` : ""}`);
+    console.log(
+      `→ ${status}${description ? ` (${description.length} chars)` : ""}${applyUrl ? " · applyUrl" : ""}`
+    );
 
     if (index < pending.length) {
       const jitter = Math.floor(Math.random() * 2000);

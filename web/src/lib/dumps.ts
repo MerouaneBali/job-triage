@@ -4,9 +4,44 @@ import Database from "better-sqlite3";
 import { dataPaths } from "./paths";
 import type { DumpDetail, DumpSummary, HtmlDump, JobRow } from "./types";
 
+function ensureJobsTrackColumns(db: Database.Database) {
+  const cols = new Set(
+    (
+      db.prepare(`PRAGMA table_info(jobs)`).all() as Array<{ name: string }>
+    ).map((r) => r.name)
+  );
+  const add = (name: string, ddl: string) => {
+    if (!cols.has(name)) {
+      db.exec(`ALTER TABLE jobs ADD COLUMN ${name} ${ddl}`);
+      cols.add(name);
+    }
+  };
+  add("track_status", "TEXT");
+  add("apply_channel", "TEXT");
+  add("track_note", "TEXT");
+  add("tracked_at", "TEXT");
+  add("applied_at", "TEXT");
+  add("source", "TEXT");
+  add("apply_url", "TEXT");
+  db.exec(`
+    UPDATE jobs SET source = 'linkedin_job' WHERE source IS NULL OR source = '';
+    UPDATE jobs
+    SET track_status = 'todo',
+        tracked_at = COALESCE(tracked_at, datetime('now'))
+    WHERE decision IN ('apply', 'maybe')
+      AND (track_status IS NULL OR track_status = '');
+  `);
+}
+
 function openAppDb() {
   const path = dataPaths().db;
-  return new Database(path, { readonly: false, fileMustExist: false });
+  const db = new Database(path, { readonly: false, fileMustExist: false });
+  try {
+    ensureJobsTrackColumns(db);
+  } catch {
+    // table may not exist yet
+  }
+  return db;
 }
 
 export function safeBasename(name: string): string | null {
@@ -156,7 +191,104 @@ function rowToJob(row: Record<string, unknown>): JobRow {
     qualifyReasons: qualify?.reasons ?? null,
     recommendation: evaluation?.recommendation ?? null,
     stage3Error: (row.stage3_error as string) ?? null,
+    trackStatus: (row.track_status as JobRow["trackStatus"]) ?? null,
+    applyChannel: (row.apply_channel as JobRow["applyChannel"]) ?? null,
+    trackNote: (row.track_note as string) ?? null,
+    trackedAt: (row.tracked_at as string) ?? null,
+    appliedAt: (row.applied_at as string) ?? null,
+    source: (row.source as string) ?? "linkedin_job",
+    applyUrl: (row.apply_url as string) ?? null,
   };
+}
+
+const TRACK_STATUSES = new Set(["todo", "applied", "waiting", "closed"]);
+const APPLY_CHANNELS = new Set(["easy_apply", "external", "message"]);
+
+export function updateJobTrackFields(
+  dumpName: string,
+  jobId: string,
+  patch: {
+    trackStatus?: JobRow["trackStatus"] | null;
+    applyChannel?: JobRow["applyChannel"] | null;
+    trackNote?: string | null;
+  }
+): JobRow {
+  const stem = safeBasename(dumpName);
+  if (!stem) throw Object.assign(new Error("Invalid dump name"), { status: 400 });
+  const db = openAppDb();
+  try {
+    const dump = db
+      .prepare(`SELECT id FROM dumps WHERE basename = ?`)
+      .get(stem) as { id: number } | undefined;
+    if (!dump) throw Object.assign(new Error("Dump not found"), { status: 404 });
+
+    const row = db
+      .prepare(`SELECT * FROM jobs WHERE dump_id = ? AND job_id = ?`)
+      .get(dump.id, String(jobId)) as Record<string, unknown> | undefined;
+    if (!row) throw Object.assign(new Error("Job not found"), { status: 404 });
+
+    let trackStatus =
+      patch.trackStatus !== undefined
+        ? patch.trackStatus
+        : (row.track_status as string | null);
+    if (
+      trackStatus != null &&
+      trackStatus !== "" &&
+      !TRACK_STATUSES.has(trackStatus)
+    ) {
+      throw Object.assign(new Error(`Invalid trackStatus`), { status: 400 });
+    }
+
+    let applyChannel =
+      patch.applyChannel !== undefined
+        ? patch.applyChannel
+        : (row.apply_channel as string | null);
+    if (
+      applyChannel != null &&
+      applyChannel !== "" &&
+      !APPLY_CHANNELS.has(applyChannel)
+    ) {
+      throw Object.assign(new Error(`Invalid applyChannel`), { status: 400 });
+    }
+
+    const trackNote =
+      patch.trackNote !== undefined ? patch.trackNote : (row.track_note as string | null);
+
+    const stamp = new Date().toISOString();
+    let appliedAt = (row.applied_at as string | null) ?? null;
+    if (trackStatus === "applied" && row.track_status !== "applied") {
+      appliedAt = stamp;
+    }
+    let trackedAt = (row.tracked_at as string | null) || stamp;
+    if (trackStatus && trackStatus !== row.track_status) {
+      trackedAt = stamp;
+    }
+
+    db.prepare(`
+      UPDATE jobs SET
+        track_status = @track_status,
+        apply_channel = @apply_channel,
+        track_note = @track_note,
+        tracked_at = @tracked_at,
+        applied_at = @applied_at
+      WHERE dump_id = @dump_id AND job_id = @job_id
+    `).run({
+      dump_id: dump.id,
+      job_id: String(jobId),
+      track_status: trackStatus ?? null,
+      apply_channel: applyChannel ?? null,
+      track_note: trackNote ?? null,
+      tracked_at: trackedAt,
+      applied_at: appliedAt,
+    });
+
+    const updated = db
+      .prepare(`SELECT * FROM jobs WHERE dump_id = ? AND job_id = ?`)
+      .get(dump.id, String(jobId)) as Record<string, unknown>;
+    return rowToJob(updated);
+  } finally {
+    db.close();
+  }
 }
 
 export function mergeDump(stage1Name: string): DumpDetail {

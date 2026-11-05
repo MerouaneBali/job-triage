@@ -6,6 +6,7 @@ import { CompanyLogo } from "@/components/company-logo";
 import { DecisionBadge } from "@/components/decision-badge";
 import { JobDetailSheet } from "@/components/job-detail-sheet";
 import { PipelineBar } from "@/components/pipeline-bar";
+import { TrackStatusBadge } from "@/components/track-status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -270,48 +271,65 @@ export function TriageApp() {
             from your phone — you still apply manually.
           </p>
         </div>
-        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-          {dumpsLoading ? (
-            <Skeleton className="h-11 w-full min-w-0 flex-1 sm:min-w-[280px]" />
-          ) : (
-            <Select
-              key={dumps.map((d) => d.name).join("|") || "empty"}
-              value={
-                dumpName && dumps.some((d) => d.name === dumpName)
-                  ? dumpName
-                  : null
-              }
-              onValueChange={(v) => setDumpName(v)}
+        {view !== "pipeline" ? (
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            {dumpsLoading ? (
+              <Skeleton className="h-11 w-full min-w-0 flex-1 sm:min-w-[280px]" />
+            ) : (
+              <Select
+                key={dumps.map((d) => d.name).join("|") || "empty"}
+                value={
+                  dumpName && dumps.some((d) => d.name === dumpName)
+                    ? dumpName
+                    : null
+                }
+                onValueChange={(v) => setDumpName(v)}
+              >
+                <SelectTrigger className="min-h-11 w-full min-w-0 flex-1 sm:min-w-[280px]">
+                  <SelectValue placeholder="Select dump…">
+                    {(value) => {
+                      const d = dumps.find((x) => x.name === value);
+                      return (
+                        <span className="truncate">
+                          {d?.label || d?.name || String(value ?? "")}
+                        </span>
+                      );
+                    }}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {dumps.map((d) => (
+                    <SelectItem
+                      key={d.name}
+                      value={d.name}
+                      label={d.label || d.name}
+                    >
+                      {d.label || d.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            <Button
+              variant="outline"
+              size="icon"
+              className="min-h-11 min-w-11"
+              onClick={() => void refreshAll()}
+              aria-label="Refresh"
+              disabled={bootLoading}
             >
-              <SelectTrigger className="min-h-11 w-full min-w-0 flex-1 sm:min-w-[280px]">
-                <SelectValue placeholder="Select dump…" />
-              </SelectTrigger>
-              <SelectContent>
-                {dumps.map((d) => (
-                  <SelectItem key={d.name} value={d.name}>
-                    {d.label || d.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-          <Button
-            variant="outline"
-            size="icon"
-            className="min-h-11 min-w-11"
-            onClick={() => void refreshAll()}
-            aria-label="Refresh"
-            disabled={bootLoading}
-          >
-            <RefreshCw className={cn(bootLoading && "animate-spin")} />
-          </Button>
-        </div>
+              <RefreshCw className={cn(bootLoading && "animate-spin")} />
+            </Button>
+          </div>
+        ) : null}
       </header>
 
-      {bootLoading && !meta ? (
-        <Skeleton className="h-3 w-64 max-w-full" />
-      ) : meta ? (
-        <p className="text-xs text-muted-foreground">{meta}</p>
+      {view !== "pipeline" ? (
+        bootLoading && !meta ? (
+          <Skeleton className="h-3 w-64 max-w-full" />
+        ) : meta ? (
+          <p className="text-xs text-muted-foreground">{meta}</p>
+        ) : null
       ) : null}
 
       {/* Desktop top tabs */}
@@ -337,7 +355,9 @@ export function TriageApp() {
 
       {view === "pipeline" ? (
         <PipelineBar
+          dumps={dumps}
           dumpName={dumpName}
+          onDumpChange={setDumpName}
           onJobFinished={() => void refreshAll()}
           onDumpReady={(name) => {
             setDumpName(name);
@@ -349,7 +369,19 @@ export function TriageApp() {
       {view === "apply" ? (
         <ApplyQueue
           jobs={detail?.jobs || []}
+          dumpName={dumpName}
           onOpenJob={openJob}
+          onJobUpdated={(job) => {
+            setDetail((prev) => {
+              if (!prev) return prev;
+              return {
+                ...prev,
+                jobs: prev.jobs.map((j) =>
+                  String(j.id) === String(job.id) ? { ...j, ...job } : j
+                ),
+              };
+            });
+          }}
           loading={bootLoading}
         />
       ) : null}
@@ -504,6 +536,7 @@ export function TriageApp() {
               >
                 Decision
               </TableHead>
+              <TableHead>Status</TableHead>
               <TableHead
                 className="cursor-pointer"
                 onClick={() => toggleSort("fitScore")}
@@ -540,6 +573,9 @@ export function TriageApp() {
                   <TableRow key={`sk-${i}`}>
                     <TableCell>
                       <Skeleton className="h-5 w-14" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-5 w-16" />
                     </TableCell>
                     <TableCell>
                       <Skeleton className="h-5 w-8" />
@@ -581,6 +617,15 @@ export function TriageApp() {
                   >
                     <TableCell>
                       <DecisionBadge decision={job.decision ?? null} />
+                    </TableCell>
+                    <TableCell>
+                      <TrackStatusBadge
+                        status={
+                          job.decision === "apply" || job.decision === "maybe"
+                            ? job.trackStatus || "todo"
+                            : job.trackStatus
+                        }
+                      />
                     </TableCell>
                     <TableCell className="tabular-nums">
                       {job.fitScore == null ? "—" : job.fitScore}
@@ -631,7 +676,7 @@ export function TriageApp() {
             {!bootLoading && !filtered.length && (
               <TableRow>
                 <TableCell
-                  colSpan={9}
+                  colSpan={10}
                   className="h-24 text-center text-muted-foreground"
                 >
                   {dumpName

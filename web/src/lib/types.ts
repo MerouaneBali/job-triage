@@ -1,5 +1,8 @@
 export type Decision = "apply" | "maybe" | "skip" | null;
 
+export type TrackStatus = "todo" | "applied" | "waiting" | "closed";
+export type ApplyChannel = "easy_apply" | "external" | "message";
+
 export type TaggedItem = {
   item: string;
   tag: "match" | "partial_match" | "gap" | "unknown";
@@ -64,6 +67,14 @@ export type JobRow = {
   qualify?: Qualify | null;
   qualifyReasons?: string[] | null;
   stage3Error?: string | null;
+  trackStatus?: TrackStatus | null;
+  applyChannel?: ApplyChannel | null;
+  trackNote?: string | null;
+  trackedAt?: string | null;
+  appliedAt?: string | null;
+  source?: string | null;
+  /** Company/ATS apply URL when known; else fall back to LinkedIn `url`. */
+  applyUrl?: string | null;
 };
 
 export type DumpSummary = {

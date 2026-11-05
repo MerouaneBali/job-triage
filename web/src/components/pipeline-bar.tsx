@@ -12,13 +12,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { HtmlDump, PipelineJob } from "@/lib/types";
+import type { DumpSummary, HtmlDump, PipelineJob } from "@/lib/types";
 import { Bot, FileSearch, Loader2, Sparkles, Upload } from "lucide-react";
 
 type Props = {
+  dumps: DumpSummary[];
   dumpName: string | null;
+  onDumpChange: (name: string) => void;
   onJobFinished: () => void;
-  /** After Stage 1 parse succeeds, select this dump in the header picker. */
+  /** After Stage 1 parse succeeds, select this dump for Stage 2/3. */
   onDumpReady?: (basename: string) => void;
 };
 
@@ -26,7 +28,13 @@ function stemFromHtmlName(htmlName: string) {
   return htmlName.replace(/\.html?$/i, "");
 }
 
-export function PipelineBar({ dumpName, onJobFinished, onDumpReady }: Props) {
+export function PipelineBar({
+  dumps,
+  dumpName,
+  onDumpChange,
+  onJobFinished,
+  onDumpReady,
+}: Props) {
   const [htmlDumps, setHtmlDumps] = useState<HtmlDump[]>([]);
   const [htmlName, setHtmlName] = useState<string>("");
   const [fetchLimit, setFetchLimit] = useState("5");
@@ -206,6 +214,43 @@ export function PipelineBar({ dumpName, onJobFinished, onDumpReady }: Props) {
 
   return (
     <div className="min-w-0 space-y-3 overflow-hidden rounded-xl border bg-card p-3 shadow-sm sm:p-4">
+      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+        <p className="shrink-0 text-xs font-medium text-muted-foreground">
+          Dump for Stage 2 / 3
+        </p>
+        <Select
+          key={dumps.map((d) => d.name).join("|") || "empty"}
+          value={
+            dumpName && dumps.some((d) => d.name === dumpName) ? dumpName : null
+          }
+          onValueChange={(v) => onDumpChange(v)}
+        >
+          <SelectTrigger className="min-h-11 w-full min-w-0 sm:max-w-md">
+            <SelectValue placeholder="Parsed dump…">
+              {(value) => {
+                const d = dumps.find((x) => x.name === value);
+                return (
+                  <span className="truncate">
+                    {d?.label || d?.name || String(value ?? "")}
+                  </span>
+                );
+              }}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {dumps.map((d) => (
+              <SelectItem
+                key={d.name}
+                value={d.name}
+                label={d.label || d.name}
+              >
+                {d.label || d.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
       <div className="grid min-w-0 gap-3 lg:grid-cols-3">
         {/* Stage 1 */}
         <div className="min-w-0 space-y-3 rounded-lg border border-dashed p-3">
@@ -244,12 +289,22 @@ export function PipelineBar({ dumpName, onJobFinished, onDumpReady }: Props) {
             onValueChange={(v) => setHtmlName(v ?? "")}
           >
             <SelectTrigger className="min-h-11 w-full min-w-0">
-              <SelectValue placeholder="On disk…" />
+              <SelectValue placeholder="HTML on disk…">
+                {(value) => (
+                  <span className="truncate">
+                    {stemFromHtmlName(String(value ?? "")) || "HTML on disk…"}
+                  </span>
+                )}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               {htmlDumps.map((d) => (
-                <SelectItem key={d.name} value={d.name}>
-                  {d.name}
+                <SelectItem
+                  key={d.name}
+                  value={d.name}
+                  label={stemFromHtmlName(d.name)}
+                >
+                  <span className="truncate">{stemFromHtmlName(d.name)}</span>
                 </SelectItem>
               ))}
             </SelectContent>
@@ -277,11 +332,8 @@ export function PipelineBar({ dumpName, onJobFinished, onDumpReady }: Props) {
             </span>
           </div>
           <p className="text-xs leading-relaxed text-muted-foreground">
-            Uses the dump selected in the header. Chromium runs on this machine.
-            Skips jobs that already have descriptions unless you force refetch.
-          </p>
-          <p className="truncate rounded-md bg-muted/50 px-2 py-1.5 font-mono text-[11px] text-muted-foreground">
-            {dumpName ? `Target: ${dumpName}` : "Select a dump in the header first"}
+            Chromium runs on this machine. Skips jobs that already have
+            descriptions unless you force refetch.
           </p>
           <div className="flex items-center gap-2">
             <label className="shrink-0 text-xs text-muted-foreground" htmlFor="fetch-limit">

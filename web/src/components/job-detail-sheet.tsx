@@ -94,8 +94,9 @@ export function JobDetailSheet({
                       </div>
                     </div>
                     <SheetDescription className="text-sm">
-                      {[job.company, job.location].filter(Boolean).join(" · ") ||
-                        "No company / location"}
+                      {[job.company, job.location]
+                        .filter(Boolean)
+                        .join(" · ") || "No company / location"}
                     </SheetDescription>
                     <div className="flex flex-wrap items-center gap-2 sm:hidden">
                       <DecisionBadge decision={job.decision ?? null} />
@@ -171,7 +172,7 @@ export function JobDetailSheet({
                         <div
                           className={cn(
                             "rounded-md border p-3",
-                            ELIGIBILITY_STYLES[evaln.eligibility.status]
+                            ELIGIBILITY_STYLES[evaln.eligibility.status],
                           )}
                         >
                           <p className="text-sm leading-relaxed">

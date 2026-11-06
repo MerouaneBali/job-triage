@@ -28,6 +28,7 @@ import {
   nowIso,
   findJobTwin,
   copyJobTriageFromTwin,
+  logUsage,
 } from "../db.mjs";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -67,6 +68,16 @@ const maxErrorsIdx = args.indexOf("--max-errors");
 const maxConsecutiveErrors = maxErrorsIdx >= 0 ? Number(args[maxErrorsIdx + 1]) : 3;
 const maxDescIdx = args.indexOf("--max-desc-chars");
 const MAX_DESC_CHARS = maxDescIdx >= 0 ? Number(args[maxDescIdx + 1]) : 8_000;
+
+/** Flatten drainUsage() result into logUsage() param names. */
+function flattenUsage(u) {
+  return {
+    inputTokens: u.input_tokens,
+    outputTokens: u.output_tokens,
+    cacheReadTokens: u.cache_read_tokens,
+    cacheWriteTokens: u.cache_write_tokens,
+  };
+}
 
 /** Which items to generate (applies when skipGenerate is false). */
 function buildWhat(decision) {
@@ -260,6 +271,12 @@ try {
         force,
       });
 
+      // Log qualify usage
+      const qualifyUsage = claude.drainUsage();
+      if (qualifyUsage.input_tokens > 0) {
+        logUsage(db, { model: claude.model, dumpName, jobId: job.id, stage: "qualify", ...flattenUsage(qualifyUsage) });
+      }
+
       // Reset consecutive error counter on successful API call
       consecutiveApiErrors = 0;
 
@@ -283,6 +300,11 @@ try {
           force,
           what,
         });
+        // Log generate usage
+        const genUsage = claude.drainUsage();
+        if (genUsage.input_tokens > 0) {
+          logUsage(db, { model: claude.model, dumpName, jobId: job.id, stage: "generate", ...flattenUsage(genUsage) });
+        }
         consecutiveApiErrors = 0;
       } else if (decision === "maybe" && !generateMaybe && !skipGenerate) {
         console.log(`  skipping materials for maybe (use --generate-maybe to include)`);

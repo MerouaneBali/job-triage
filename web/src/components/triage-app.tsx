@@ -430,19 +430,18 @@ export function TriageApp() {
         ))}
       </div>
 
-      {view !== "dashboard" ? (
-        <PipelineBar
-          dumps={dumps}
-          dumpName={dumpName === ALL_DUMPS ? dumps[0]?.name ?? null : dumpName}
-          onDumpChange={setDumpName}
-          showStages={view === "pipeline"}
-          onJobFinished={() => void refreshAll()}
-          onDumpReady={(name) => {
-            setDumpName(name);
-            void refreshAll();
-          }}
-        />
-      ) : null}
+      {/* PipelineBar always rendered — its terminal overlay must be visible on all views */}
+      <PipelineBar
+        dumps={dumps}
+        dumpName={dumpName === ALL_DUMPS ? dumps[0]?.name ?? null : dumpName}
+        onDumpChange={setDumpName}
+        showStages={view === "pipeline"}
+        onJobFinished={() => void refreshAll()}
+        onDumpReady={(name) => {
+          setDumpName(name);
+          void refreshAll();
+        }}
+      />
 
       {view === "apply" ? (
         <ApplyQueue

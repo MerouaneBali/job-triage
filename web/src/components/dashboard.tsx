@@ -1,11 +1,40 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { RefreshCw, TrendingUp, Briefcase, Inbox, Clock, CheckCircle2, BarChart2 } from "lucide-react";
+import { RefreshCw, TrendingUp, Briefcase, Inbox, Clock, CheckCircle2, BarChart2, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import type { DashboardData } from "@/app/api/dashboard/route";
+import type { DashboardData, UsageStat } from "@/app/api/dashboard/route";
+
+// ─── pricing ──────────────────────────────────────────────────────────────────
+// Rates per million tokens (MTok). Add more model slugs as needed.
+const MODEL_RATES: Record<string, { in: number; out: number; cacheRead: number; cacheWrite: number }> = {
+  default:               { in: 3.00,  out: 15.00, cacheRead: 0.30, cacheWrite: 3.75 },
+  "claude-sonnet-5-5":   { in: 3.00,  out: 15.00, cacheRead: 0.30, cacheWrite: 3.75 },
+  "claude-sonnet-5":     { in: 3.00,  out: 15.00, cacheRead: 0.30, cacheWrite: 3.75 },
+  "claude-opus-4":       { in: 15.00, out: 75.00, cacheRead: 1.50, cacheWrite: 18.75 },
+  "claude-haiku-3-5":    { in: 0.80,  out: 4.00,  cacheRead: 0.08, cacheWrite: 1.00 },
+};
+function estimateCost(row: UsageStat): number {
+  const r = MODEL_RATES[row.model] ?? MODEL_RATES.default;
+  const M = 1_000_000;
+  return (
+    (row.inputTokens * r.in) / M +
+    (row.outputTokens * r.out) / M +
+    (row.cacheReadTokens * r.cacheRead) / M +
+    (row.cacheWriteTokens * r.cacheWrite) / M
+  );
+}
+function fmtCost(usd: number) {
+  if (usd < 0.01) return `< $0.01`;
+  return `$${usd.toFixed(2)}`;
+}
+function fmtTokens(n: number) {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
 
 // ─── tiny chart primitives ────────────────────────────────────────────────────
 
@@ -457,6 +486,92 @@ export function Dashboard() {
               )}
             </Card>
           </div>
+
+          {/* ── Claude Usage ───────────────────────────────────────────── */}
+          {(data.usage.length > 0 || data.usageByDay.length > 0) && (() => {
+            const totalIn = data.usage.reduce((s, r) => s + r.inputTokens, 0);
+            const totalOut = data.usage.reduce((s, r) => s + r.outputTokens, 0);
+            const totalCost = data.usage.reduce((s, r) => s + estimateCost(r), 0);
+            const totalCalls = data.usage.reduce((s, r) => s + r.calls, 0);
+
+            const maxDailyTokens = Math.max(
+              ...data.usageByDay.map((d) => d.inputTokens + d.outputTokens),
+              1,
+            );
+
+            return (
+              <div className="mt-2 space-y-3">
+                <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                  <Zap className="size-3.5" />
+                  Claude Usage
+                </h2>
+
+                {/* KPI row */}
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <Stat label="API calls" value={String(totalCalls)} icon={BarChart2} />
+                  <Stat label="Input tokens" value={fmtTokens(totalIn)} icon={TrendingUp} />
+                  <Stat label="Output tokens" value={fmtTokens(totalOut)} icon={TrendingUp} />
+                  <Stat label="Est. cost (all time)" value={fmtCost(totalCost)} icon={Zap} />
+                </div>
+
+                {/* Daily token chart (last 30 days) */}
+                {data.usageByDay.length > 0 && (
+                  <Card title="Daily tokens (last 30 days)">
+                    <BarChart
+                      bars={data.usageByDay.map((d) => ({
+                        label: d.date.slice(5), // MM-DD
+                        value: d.inputTokens + d.outputTokens,
+                      }))}
+                      height={70}
+                      color="#8b5cf6"
+                      labelEvery={7}
+                    />
+                  </Card>
+                )}
+
+                {/* Breakdown by model + stage */}
+                <Card title="Breakdown by model & stage">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b text-left text-muted-foreground">
+                          <th className="pb-1.5 pr-4 font-medium">Model</th>
+                          <th className="pb-1.5 pr-4 font-medium">Stage</th>
+                          <th className="pb-1.5 pr-4 font-medium text-right">Calls</th>
+                          <th className="pb-1.5 pr-4 font-medium text-right">Input</th>
+                          <th className="pb-1.5 pr-4 font-medium text-right">Output</th>
+                          <th className="pb-1.5 font-medium text-right">Est. cost</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {data.usage.map((row, i) => (
+                          <tr key={i} className="text-foreground">
+                            <td className="py-1.5 pr-4 font-mono">{row.model}</td>
+                            <td className="py-1.5 pr-4 capitalize text-muted-foreground">{row.stage}</td>
+                            <td className="py-1.5 pr-4 text-right tabular-nums">{row.calls}</td>
+                            <td className="py-1.5 pr-4 text-right tabular-nums">{fmtTokens(row.inputTokens)}</td>
+                            <td className="py-1.5 pr-4 text-right tabular-nums">{fmtTokens(row.outputTokens)}</td>
+                            <td className="py-1.5 text-right tabular-nums font-medium">{fmtCost(estimateCost(row))}</td>
+                          </tr>
+                        ))}
+                        <tr className="border-t font-semibold">
+                          <td colSpan={2} className="pt-2 text-muted-foreground">Total</td>
+                          <td className="pt-2 text-right tabular-nums">{totalCalls}</td>
+                          <td className="pt-2 text-right tabular-nums">{fmtTokens(totalIn)}</td>
+                          <td className="pt-2 text-right tabular-nums">{fmtTokens(totalOut)}</td>
+                          <td className="pt-2 text-right tabular-nums">{fmtCost(totalCost)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="mt-2 text-[10px] text-muted-foreground">
+                    Cost estimates based on published Anthropic pricing. Actual charges may differ.
+                    Only tracks usage made through this tool.
+                  </p>
+                </Card>
+              </div>
+            );
+          })()}
         </>
       ) : null}
     </div>

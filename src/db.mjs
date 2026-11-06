@@ -94,6 +94,34 @@ function migrateSchema(db) {
   ensureJobsTrackColumns(db);
 }
 
+/** Create usage_log table if it doesn't exist (safe to call repeatedly). */
+export function ensureUsageLog(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS usage_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts TEXT NOT NULL DEFAULT (datetime('now')),
+      model TEXT NOT NULL,
+      dump_name TEXT,
+      job_id INTEGER,
+      stage TEXT NOT NULL,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_write_tokens INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_usage_ts ON usage_log(ts);
+  `);
+}
+
+/** Append one API-call entry to usage_log. */
+export function logUsage(db, { model, dumpName, jobId, stage, inputTokens, outputTokens, cacheReadTokens = 0, cacheWriteTokens = 0 }) {
+  ensureUsageLog(db);
+  db.prepare(`
+    INSERT INTO usage_log (ts, model, dump_name, job_id, stage, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens)
+    VALUES (datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(model, dumpName ?? null, jobId ?? null, stage, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens);
+}
+
 /** Additive columns for application tracking (safe on existing DBs). */
 export function ensureJobsTrackColumns(db) {
   const cols = new Set(

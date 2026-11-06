@@ -7,6 +7,16 @@ export const dynamic = "force-dynamic";
 export type DailyBar = { date: string; count: number };
 export type ScoreBucket = { label: string; count: number };
 export type GapItem = { text: string; count: number };
+export type UsageStat = {
+  model: string;
+  stage: string;
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+};
+export type DailyUsage = { date: string; inputTokens: number; outputTokens: number };
 
 export type DashboardData = {
   /** Overall funnel counts */
@@ -32,6 +42,10 @@ export type DashboardData = {
   dumpStages: { parsed: number; fetched: number; stage3: number };
   /** Easy-apply vs external split in apply pile */
   applyChannel: { easy: number; external: number; message: number; unknown: number };
+  /** Claude API usage stats */
+  usage: UsageStat[];
+  /** Daily token usage, last 30 days */
+  usageByDay: DailyUsage[];
 };
 
 export async function GET() {
@@ -220,6 +234,37 @@ export async function GET() {
       unknown: chanMap.unknown ?? 0,
     };
 
+    // --- Claude usage (graceful if table missing) ---
+    let usage: UsageStat[] = [];
+    let usageByDay: DailyUsage[] = [];
+    try {
+      const usageRows = db.prepare(`
+        SELECT model, stage,
+               COUNT(*) AS calls,
+               SUM(input_tokens) AS inputTokens,
+               SUM(output_tokens) AS outputTokens,
+               SUM(cache_read_tokens) AS cacheReadTokens,
+               SUM(cache_write_tokens) AS cacheWriteTokens
+        FROM usage_log
+        GROUP BY model, stage
+        ORDER BY model, stage
+      `).all() as UsageStat[];
+      usage = usageRows;
+
+      const dailyRows = db.prepare(`
+        SELECT substr(ts, 1, 10) AS date,
+               SUM(input_tokens) AS inputTokens,
+               SUM(output_tokens) AS outputTokens
+        FROM usage_log
+        WHERE ts >= date('now', '-30 days')
+        GROUP BY substr(ts, 1, 10)
+        ORDER BY date ASC
+      `).all() as DailyUsage[];
+      usageByDay = dailyRows;
+    } catch {
+      // usage_log table doesn't exist yet — ignore
+    }
+
     return NextResponse.json({
       funnel: { totalSeen, fetched, triaged, applyDecision, applied, waiting },
       decisions,
@@ -229,6 +274,8 @@ export async function GET() {
       topGaps,
       dumpStages: { parsed: dumpParsed, fetched: dumpFetched, stage3: dumpStage3 },
       applyChannel,
+      usage,
+      usageByDay,
     } satisfies DashboardData);
   } finally {
     db.close();

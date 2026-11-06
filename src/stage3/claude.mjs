@@ -23,6 +23,16 @@ export function createClaudeClient(env = process.env) {
   const model = env.ANTHROPIC_MODEL || DEFAULT_MODEL;
   const client = new Anthropic({ apiKey });
 
+  // Accumulated usage since last drainUsage() call
+  let accum = { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 };
+
+  /** Return accumulated usage since last drain and reset the counter. */
+  function drainUsage() {
+    const snap = { ...accum };
+    accum = { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 };
+    return snap;
+  }
+
   /**
    * Call Claude with a strict tool and return validated tool input.
    * Relies on prompt instructions (not forced tool_choice) to invoke the tool.
@@ -56,6 +66,12 @@ Respond by calling the ${tool.name} tool with your complete result. Do not reply
           `  Claude ${model}: in=${usage.input_tokens ?? "?"} out=${usage.output_tokens ?? "?"} stop=${res.stop_reason}`
         );
 
+        // Accumulate for drainUsage()
+        accum.input_tokens += usage.input_tokens || 0;
+        accum.output_tokens += usage.output_tokens || 0;
+        accum.cache_read_tokens += usage.cache_read_input_tokens || 0;
+        accum.cache_write_tokens += usage.cache_creation_input_tokens || 0;
+
         const block = (res.content || []).find(
           (b) => b.type === "tool_use" && b.name === tool.name
         );
@@ -84,7 +100,7 @@ Respond by calling the ${tool.name} tool with your complete result. Do not reply
     throw lastErr;
   }
 
-  return { model, toolCall };
+  return { model, toolCall, drainUsage };
 }
 
 export default createClaudeClient;

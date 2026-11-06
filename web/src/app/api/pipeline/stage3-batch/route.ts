@@ -12,6 +12,11 @@ export async function POST(req: Request) {
       limit?: number;
       force?: boolean;
       skipGenerate?: boolean;
+      generateMaybe?: boolean;
+      generateCoverLetter?: boolean;
+      generateOutreach?: boolean;
+      generateStrategy?: boolean;
+      descMaxChars?: number;
     };
     const dumpNames = (body.dumpNames || [])
       .map((n) => safeBasename(n))
@@ -26,6 +31,11 @@ export async function POST(req: Request) {
       limit: body.limit,
       force: Boolean(body.force),
       skipGenerate: Boolean(body.skipGenerate),
+      generateMaybe: Boolean(body.generateMaybe),
+      generateCoverLetter: body.generateCoverLetter !== false,
+      generateOutreach: Boolean(body.generateOutreach),
+      generateStrategy: Boolean(body.generateStrategy),
+      descMaxChars: body.descMaxChars,
     });
     return NextResponse.json({ job });
   } catch (e) {

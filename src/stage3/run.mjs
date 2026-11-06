@@ -40,10 +40,15 @@ if (args.length === 0 || args.includes("--help")) {
   basename   Dump stem in SQLite (e.g. linkedin-jobs-2026-11-03T00-01-37-705Z)
 
 Options:
-  --limit N          Evaluate at most N jobs that pass qualify
-  --skip-generate    Do not call Claude for cover letters / outreach
-  --qualify-only     Qualify only (no API); writes skip/pending into DB
-  --force            Ignore SQLite Claude cache
+  --limit N             Evaluate at most N jobs that pass qualify
+  --skip-generate       Do not call Claude for cover letters / outreach at all
+  --generate-maybe      Also generate materials for 'maybe' decisions (default: apply only)
+  --no-cover-letter     Skip cover letter generation (saves tokens)
+  --no-outreach         Skip outreach message generation (saves tokens; default for maybe)
+  --qualify-only        Qualify only (no API); writes skip/pending into DB
+  --force               Ignore SQLite Claude cache
+  --max-errors N        Abort batch after N consecutive Claude API errors (default 3)
+  --max-desc-chars N    Truncate descriptions at N chars (default 8000, 0 = no cap)
 `);
   process.exit(args.includes("--help") ? 0 : 1);
 }
@@ -52,8 +57,26 @@ const basename = basenameFromArg(args.find((a) => !a.startsWith("--")));
 const limitIdx = args.indexOf("--limit");
 const limit = limitIdx >= 0 ? Number(args[limitIdx + 1]) : Infinity;
 const skipGenerate = args.includes("--skip-generate");
+const generateMaybe = args.includes("--generate-maybe");
+const noCoverLetter = args.includes("--no-cover-letter");
+const noOutreach = args.includes("--no-outreach");
+const generateStrategy = args.includes("--generate-strategy");
 const qualifyOnly = args.includes("--qualify-only");
 const force = args.includes("--force");
+const maxErrorsIdx = args.indexOf("--max-errors");
+const maxConsecutiveErrors = maxErrorsIdx >= 0 ? Number(args[maxErrorsIdx + 1]) : 3;
+const maxDescIdx = args.indexOf("--max-desc-chars");
+const MAX_DESC_CHARS = maxDescIdx >= 0 ? Number(args[maxDescIdx + 1]) : 8_000;
+
+/** Which items to generate (applies when skipGenerate is false). */
+function buildWhat(decision) {
+  const what = ["questions", "cv"];
+  if (!noCoverLetter) what.push("coverLetter");
+  if (generateStrategy) what.push("strategy");
+  // For maybe: skip outreach by default; for apply: include unless noOutreach
+  if (!noOutreach && (decision === "apply" || generateMaybe)) what.push("outreach");
+  return what;
+}
 
 const profileDir = join(root, "data", "profile");
 const canonicalPath = join(profileDir, "canonical.json");
@@ -163,14 +186,37 @@ try {
   process.exit(1);
 }
 
-console.log(`Evaluating ${toEval.length} jobs with ${claude.model} …`);
+console.log(
+  `Evaluating ${toEval.length} jobs with ${claude.model} …` +
+  (generateMaybe ? " (materials for apply+maybe)" : " (materials for apply only)")
+);
+if (MAX_DESC_CHARS < Infinity)
+  console.log(`Description cap: ${MAX_DESC_CHARS} chars to save tokens.`);
+
+let consecutiveApiErrors = 0;
 
 try {
   for (let i = 0; i < toEval.length; i++) {
     const job = toEval[i];
+    // Truncate very long descriptions to cap token usage
+    const truncatedJob =
+      job.description && job.description.length > MAX_DESC_CHARS
+        ? {
+            ...job,
+            description:
+              job.description.slice(0, MAX_DESC_CHARS) +
+              `\n\n[Description truncated at ${MAX_DESC_CHARS} chars to save tokens]`,
+          }
+        : job;
+
     console.log(
       `\n[${i + 1}/${toEval.length}] ${job.id} — ${job.title} @ ${job.company}`
     );
+    if (truncatedJob.description !== job.description) {
+      console.log(
+        `  (description truncated: ${job.description.length} → ${MAX_DESC_CHARS} chars)`
+      );
+    }
     try {
       if (!force) {
         const twin = findJobTwin(db, {
@@ -210,26 +256,36 @@ try {
         cache,
         canonical,
         preferencesMd,
-        job,
+        job: truncatedJob,
         force,
       });
 
+      // Reset consecutive error counter on successful API call
+      consecutiveApiErrors = 0;
+
       let materials = null;
       const decision = evaluation.decision;
-      if (
+      // By default: generate materials for 'apply' only.
+      // Pass --generate-maybe to also generate for 'maybe' (costs ~2x more tokens).
+      const shouldGenerate =
         !skipGenerate &&
-        (decision === "apply" || decision === "maybe")
-      ) {
-        console.log(`  generating materials (${decision})…`);
+        (decision === "apply" || (generateMaybe && decision === "maybe"));
+      if (shouldGenerate) {
+        const what = buildWhat(decision);
+        console.log(`  generating materials (${decision} · ${what.join(",")})…`);
         materials = await generateForJob({
           claude,
           cache,
           canonical,
           preferencesMd,
-          job,
+          job: truncatedJob,
           evaluation,
           force,
+          what,
         });
+        consecutiveApiErrors = 0;
+      } else if (decision === "maybe" && !generateMaybe && !skipGenerate) {
+        console.log(`  skipping materials for maybe (use --generate-maybe to include)`);
       }
 
       persistResult({
@@ -249,7 +305,37 @@ try {
         error: null,
       });
     } catch (e) {
-      console.error(`  ERROR ${job.id}:`, e.message || e);
+      const msg = String(e.message || e);
+      console.error(`  ERROR ${job.id}:`, msg);
+
+      // Distinguish Claude API errors (network/rate/server) from job-specific errors
+      const isApiError =
+        /status (429|500|503|529)|rate.?limit|overloaded|timeout|ECONNRESET|ENOTFOUND/i.test(msg) ||
+        e?.status === 429 || e?.status === 500 || e?.status === 503;
+
+      if (isApiError) {
+        consecutiveApiErrors += 1;
+        if (consecutiveApiErrors >= maxConsecutiveErrors) {
+          console.error(
+            `\n⚠ ${consecutiveApiErrors} consecutive Claude API errors — aborting batch.\n` +
+            `  Last error: ${msg}\n` +
+            `  Processed ${i + 1}/${toEval.length} jobs. Re-run to continue from where you left off.`
+          );
+          // Save current job's error record before aborting
+          persistResult({
+            id: job.id, title: job.title, company: job.company,
+            location: job.location, url: job.url,
+            decision: "skip", fitScore: null, confidence: null,
+            qualify: job.qualify, evaluation: null, materials: null,
+            error: `api_abort: ${msg}`,
+          });
+          break; // exit the loop — finally block will close cache
+        }
+      } else {
+        // Job-specific error (bad description, schema mismatch, etc.) — don't count toward API error threshold
+        consecutiveApiErrors = 0;
+      }
+
       persistResult({
         id: job.id,
         title: job.title,
@@ -262,7 +348,7 @@ try {
         qualify: job.qualify,
         evaluation: null,
         materials: null,
-        error: String(e.message || e),
+        error: msg,
       });
     }
   }

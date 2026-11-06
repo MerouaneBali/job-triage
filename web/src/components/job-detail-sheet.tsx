@@ -1,9 +1,11 @@
 "use client";
 
+import React from "react";
 import { CompanyLogo } from "@/components/company-logo";
 import { DecisionBadge } from "@/components/decision-badge";
 import { TagList } from "@/components/tag-list";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -16,7 +18,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { JobRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { UserRound } from "lucide-react";
+import { Loader2, Sparkles, UserRound } from "lucide-react";
 
 function LinkedInIcon({ className }: { className?: string }) {
   return (
@@ -58,14 +60,44 @@ export function JobDetailSheet({
   job,
   open,
   onOpenChange,
+  onJobUpdated,
 }: {
   job: JobRow | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onJobUpdated?: (patch: Partial<JobRow>) => void;
 }) {
+  const [localMaterials, setLocalMaterials] = React.useState<JobRow["materials"]>(null);
+  const [generating, setGenerating] = React.useState<string | null>(null); // which item is generating
+
+  // Sync local materials when job changes
+  React.useEffect(() => {
+    setLocalMaterials(null);
+  }, [job?.id]);
+
   const evaln = job?.evaluation;
-  const materials = job?.materials;
+  const materials = localMaterials ?? job?.materials;
   const elig = evaln?.eligibility?.status;
+
+  async function generate(what: string[]) {
+    if (!job?.id || generating) return;
+    setGenerating(what.join(","));
+    try {
+      const res = await fetch(`/api/jobs/${job.id}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dumpBasename: job.dumpName, what }),
+      });
+      const data = (await res.json()) as { ok?: boolean; materials?: JobRow["materials"]; error?: string };
+      if (!res.ok || !data.ok) throw new Error(data.error || "Failed");
+      setLocalMaterials(data.materials ?? null);
+      onJobUpdated?.({ id: job.id, materials: data.materials ?? null });
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Generate failed");
+    } finally {
+      setGenerating(null);
+    }
+  }
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -256,50 +288,154 @@ export function JobDetailSheet({
                   </TabsContent>
 
                   <TabsContent value="materials" className="mt-4 space-y-5">
-                    {materials?.strategy && (
-                      <Section title="Strategy">
-                        <p className="text-sm leading-relaxed whitespace-pre-wrap">
-                          {materials.strategy}
-                        </p>
-                      </Section>
-                    )}
-                    {materials?.outreachMessage && (
-                      <Section title="Outreach">
-                        <p className="rounded-md border bg-muted/40 p-3 text-sm leading-relaxed whitespace-pre-wrap">
-                          {materials.outreachMessage}
-                        </p>
-                      </Section>
-                    )}
-                    {materials?.coverLetter && (
-                      <Section title="Cover letter">
-                        <p className="rounded-md border bg-muted/40 p-3 text-sm leading-relaxed whitespace-pre-wrap">
-                          {materials.coverLetter}
-                        </p>
-                      </Section>
-                    )}
-                    {!!materials?.questionsToAsk?.length && (
-                      <Section title="Questions to ask">
-                        <ul className="list-disc space-y-1 pl-4 text-sm">
-                          {materials.questionsToAsk.map((q) => (
-                            <li key={q}>{q}</li>
-                          ))}
-                        </ul>
-                      </Section>
-                    )}
-                    {!!materials?.cvTailoringSuggestions?.length && (
-                      <Section title="CV tailoring">
-                        <ul className="list-disc space-y-1 pl-4 text-sm">
-                          {materials.cvTailoringSuggestions.map((s) => (
-                            <li key={s}>{s}</li>
-                          ))}
-                        </ul>
-                      </Section>
-                    )}
-                    {!materials && (
+                    {!job.evaluation ? (
                       <p className="text-sm text-muted-foreground">
-                        No materials generated (skipped roles or
-                        --skip-generate).
+                        No evaluation yet — run Stage 3 first.
                       </p>
+                    ) : (
+                      <>
+                        {/* Cover letter */}
+                        {materials?.coverLetter ? (
+                          <Section title="Cover letter">
+                            <p className="rounded-md border bg-muted/40 p-3 text-sm leading-relaxed whitespace-pre-wrap">
+                              {materials.coverLetter}
+                            </p>
+                          </Section>
+                        ) : (
+                          <Section title="Cover letter">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="gap-1.5"
+                              disabled={!!generating}
+                              onClick={() => void generate(["coverLetter"])}
+                            >
+                              {generating === "coverLetter" ? (
+                                <Loader2 className="size-3.5 animate-spin" />
+                              ) : (
+                                <Sparkles className="size-3.5" />
+                              )}
+                              Generate cover letter
+                            </Button>
+                          </Section>
+                        )}
+
+                        {/* Outreach */}
+                        {materials?.outreachMessage ? (
+                          <Section title="Outreach message">
+                            <p className="rounded-md border bg-muted/40 p-3 text-sm leading-relaxed whitespace-pre-wrap">
+                              {materials.outreachMessage}
+                            </p>
+                          </Section>
+                        ) : (
+                          <Section title="Outreach message">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="gap-1.5"
+                              disabled={!!generating}
+                              onClick={() => void generate(["outreach"])}
+                            >
+                              {generating === "outreach" ? (
+                                <Loader2 className="size-3.5 animate-spin" />
+                              ) : (
+                                <Sparkles className="size-3.5" />
+                              )}
+                              Generate outreach
+                            </Button>
+                          </Section>
+                        )}
+
+                        {/* Strategy */}
+                        {materials?.strategy ? (
+                          <Section title="Strategy">
+                            <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                              {materials.strategy}
+                            </p>
+                          </Section>
+                        ) : (
+                          <Section title="Strategy">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="gap-1.5"
+                              disabled={!!generating}
+                              onClick={() => void generate(["strategy"])}
+                            >
+                              {generating === "strategy" ? (
+                                <Loader2 className="size-3.5 animate-spin" />
+                              ) : (
+                                <Sparkles className="size-3.5" />
+                              )}
+                              Generate strategy
+                            </Button>
+                          </Section>
+                        )}
+
+                        {/* Questions */}
+                        {materials?.questionsToAsk?.length ? (
+                          <Section title="Questions to ask">
+                            <ul className="list-disc space-y-1 pl-4 text-sm">
+                              {materials.questionsToAsk.map((q) => (
+                                <li key={q}>{q}</li>
+                              ))}
+                            </ul>
+                          </Section>
+                        ) : !materials ? (
+                          <Section title="Questions to ask">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="gap-1.5"
+                              disabled={!!generating}
+                              onClick={() => void generate(["questions", "cv"])}
+                            >
+                              {generating?.includes("questions") ? (
+                                <Loader2 className="size-3.5 animate-spin" />
+                              ) : (
+                                <Sparkles className="size-3.5" />
+                              )}
+                              Generate questions &amp; CV tips
+                            </Button>
+                          </Section>
+                        ) : null}
+
+                        {/* CV tailoring */}
+                        {materials?.cvTailoringSuggestions?.length ? (
+                          <Section title="CV tailoring">
+                            <ul className="list-disc space-y-1 pl-4 text-sm">
+                              {materials.cvTailoringSuggestions.map((s) => (
+                                <li key={s}>{s}</li>
+                              ))}
+                            </ul>
+                          </Section>
+                        ) : null}
+
+                        {/* Generate all at once if nothing exists */}
+                        {!materials && (
+                          <div className="rounded-md border border-dashed p-3 text-center">
+                            <p className="mb-3 text-xs text-muted-foreground">
+                              No materials yet — generate what you need
+                            </p>
+                            <Button
+                              size="sm"
+                              variant="default"
+                              className="gap-1.5"
+                              disabled={!!generating}
+                              onClick={() =>
+                                void generate(["coverLetter", "outreach", "questions", "cv", "strategy"])
+                              }
+                            >
+                              {generating ? (
+                                <Loader2 className="size-3.5 animate-spin" />
+                              ) : (
+                                <Sparkles className="size-3.5" />
+                              )}
+                              Generate all materials
+                            </Button>
+                          </div>
+                        )}
+                      </>
                     )}
                   </TabsContent>
 

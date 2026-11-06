@@ -3,14 +3,24 @@ import { hashText } from "./cache.mjs";
 
 export const GENERATE_PROMPT_VERSION = "generate-v1";
 
-const SYSTEM = `You write grounded application materials for a personal job-search tool.
+function buildSystem(what) {
+  const skip = [];
+  if (!what.includes("coverLetter")) skip.push("coverLetter");
+  if (!what.includes("outreach")) skip.push("outreachMessage");
+  if (!what.includes("strategy")) skip.push("strategy");
+  const skipNote =
+    skip.length > 0
+      ? `\n- Set ${skip.join(", ")} to null — not requested for this run.`
+      : "";
+  return `You write grounded application materials for a personal job-search tool.
 Rules:
 - Use ONLY the candidate profile, preferences, job description, and evaluation provided.
 - Never invent employers, dates, metrics, degrees, or skills.
 - If something is unknown, omit it or phrase carefully without fabricating.
 - Cover letter and outreach must be concise, specific, and honest.
 - CV tailoring suggestions may only reorder/emphasize existing experience — never fabricate bullets.
-- Return results ONLY via the record_application_materials tool.`;
+- Return results ONLY via the record_application_materials tool.${skipNote}`;
+}
 
 export function buildGenerateUserPayload({
   canonical,
@@ -38,6 +48,11 @@ export function buildGenerateUserPayload({
   );
 }
 
+/**
+ * @param {object} opts
+ * @param {string[]} [opts.what]  items to generate: 'coverLetter' | 'outreach' | 'questions' | 'cv'
+ *                                Default: all items.
+ */
 export async function generateForJob({
   claude,
   cache,
@@ -46,15 +61,18 @@ export async function generateForJob({
   job,
   evaluation,
   force = false,
+  what = ["coverLetter", "outreach", "questions", "cv", "strategy"],
 }) {
   const descriptionHash = hashText(job.description);
   const profileVersion = canonical.profileVersion || "unknown";
+  // Include 'what' in cache key so different subsets are cached separately
+  const whatKey = [...what].sort().join(",");
   const cacheKey = cache.makeKey({
     kind: "generate",
     jobId: job.id,
     descriptionHash,
     profileVersion,
-    promptVersion: GENERATE_PROMPT_VERSION,
+    promptVersion: GENERATE_PROMPT_VERSION + (whatKey !== "coverLetter,cv,outreach,questions" ? `:${whatKey}` : ""),
   });
 
   if (!force) {
@@ -66,7 +84,7 @@ export async function generateForJob({
   }
 
   const { input } = await claude.toolCall({
-    system: SYSTEM,
+    system: buildSystem(what),
     user: buildGenerateUserPayload({
       canonical,
       preferencesMd,

@@ -37,7 +37,7 @@ export function CompanyLogo({
       alt=""
       width={32}
       height={32}
-      className={cn("size-8 shrink-0 rounded-md object-contain bg-white", className)}
+      className={cn("size-8 shrink-0 rounded-md object-cover", className)}
       onError={() => setFailed(true)}
     />
   );

@@ -492,21 +492,40 @@ export function startParseUpload(savedHtmlName: string): PipelineJob {
   return startParse(savedHtmlName);
 }
 
-export function startStage3(
-  dumpName: string,
-  opts: { limit?: number; force?: boolean; skipGenerate?: boolean } = {}
-): PipelineJob {
-  const stem = dumpName.replace(/\.json$/i, "");
-  if (!stem) {
-    throw Object.assign(new Error("Invalid dump basename"), { status: 400 });
-  }
+type Stage3Opts = {
+  limit?: number;
+  force?: boolean;
+  skipGenerate?: boolean;
+  generateMaybe?: boolean;
+  generateCoverLetter?: boolean;
+  generateOutreach?: boolean;
+  generateStrategy?: boolean;
+  descMaxChars?: number;
+};
+
+function buildStage3Args(stem: string, opts: Stage3Opts): string[] {
   const args = [join("src", "stage3", "run.mjs"), stem];
   if (opts.limit != null && Number.isFinite(opts.limit) && opts.limit > 0) {
     args.push("--limit", String(Math.floor(opts.limit)));
   }
   if (opts.force) args.push("--force");
   if (opts.skipGenerate) args.push("--skip-generate");
-  return startChild("stage3", args, "stage3");
+  if (opts.generateMaybe) args.push("--generate-maybe");
+  if (opts.generateCoverLetter === false) args.push("--no-cover-letter");
+  if (!opts.generateOutreach) args.push("--no-outreach");
+  if (opts.generateStrategy) args.push("--generate-strategy");
+  if (opts.descMaxChars != null && opts.descMaxChars >= 0) {
+    args.push("--max-desc-chars", String(opts.descMaxChars));
+  }
+  return args;
+}
+
+export function startStage3(dumpName: string, opts: Stage3Opts = {}): PipelineJob {
+  const stem = dumpName.replace(/\.json$/i, "");
+  if (!stem) {
+    throw Object.assign(new Error("Invalid dump basename"), { status: 400 });
+  }
+  return startChild("stage3", buildStage3Args(stem, opts), "stage3");
 }
 
 type BatchItem = { label: string; args: string[] };
@@ -717,21 +736,12 @@ export function startBatchFetch(
   return startBatch("fetch-batch", "batch-fetch", items);
 }
 
-export function startBatchStage3(
-  dumpNames: string[],
-  opts: { limit?: number; force?: boolean; skipGenerate?: boolean } = {}
-): PipelineJob {
+export function startBatchStage3(dumpNames: string[], opts: Stage3Opts = {}): PipelineJob {
   const items: BatchItem[] = [];
   for (const dumpName of dumpNames) {
     const stem = dumpName.replace(/\.json$/i, "");
     if (!stem) continue;
-    const args = [join("src", "stage3", "run.mjs"), stem];
-    if (opts.limit != null && Number.isFinite(opts.limit) && opts.limit > 0) {
-      args.push("--limit", String(Math.floor(opts.limit)));
-    }
-    if (opts.force) args.push("--force");
-    if (opts.skipGenerate) args.push("--skip-generate");
-    items.push({ label: stem, args });
+    items.push({ label: stem, args: buildStage3Args(stem, opts) });
   }
   return startBatch("stage3-batch", "batch-stage3", items);
 }

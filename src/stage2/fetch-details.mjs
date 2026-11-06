@@ -319,6 +319,9 @@ const context = await browser.newContext({
 const page = await context.newPage();
 
 let index = 0;
+let consecutiveErrors = 0;
+const CONSECUTIVE_ERROR_LIMIT = 5; // stop if N browser/network errors in a row
+
 try {
   for (const job of pending) {
     if (stopping || stopRequested()) {
@@ -429,6 +432,19 @@ try {
       ) {
         requestStop("browser-closed");
       }
+      consecutiveErrors += 1;
+      if (consecutiveErrors >= CONSECUTIVE_ERROR_LIMIT) {
+        console.error(
+          `\n⚠ ${consecutiveErrors} consecutive browser/network errors — aborting batch.\n` +
+          `  Last error: ${error}\n` +
+          `  Remaining jobs (${pending.length - index}) will be retried on next run.`
+        );
+        // Save current job's error record before aborting
+        saveDetail(db, dump.id, { id: job.id, status, description: null, error, htmlPath: null, fetchedAt: nowIso(), title, company, applyUrl });
+        upsertDump(db, { basename, fetched_at: nowIso() });
+        db.close();
+        process.exit(1);
+      }
     }
 
     if (stopping) break;
@@ -448,6 +464,8 @@ try {
     console.log(
       `→ ${status}${description ? ` (${description.length} chars)` : ""}${applyUrl ? " · applyUrl" : ""}`
     );
+    // Reset consecutive error counter on any non-error result
+    if (status !== "error") consecutiveErrors = 0;
 
     if (index < pending.length) {
       const jitter = Math.floor(Math.random() * 2000);

@@ -26,12 +26,13 @@ import { cn } from "@/lib/utils";
 import {
   Briefcase,
   ChevronDown,
-  CircleHelp,
   Copy,
   ExternalLink,
   FileText,
+  Info,
   Lightbulb,
   MessageSquare,
+  PenLine,
   UserRound,
 } from "lucide-react";
 
@@ -162,6 +163,7 @@ export function ApplyQueue({
   const [expanded, setExpanded] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+  const [noteOpen, setNoteOpen] = useState<Set<string>>(() => new Set());
 
   const counts = useMemo(() => {
     const c = { todo: 0, applied: 0, waiting: 0, closed: 0 };
@@ -227,39 +229,59 @@ export function ApplyQueue({
     );
   }
 
+  const applyCount = triageQueue.filter((j) => j.decision === "apply").length;
+  const maybeCount = triageQueue.filter((j) => j.decision === "maybe").length;
+
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap gap-2">
-        <Badge
-          variant="outline"
-          className="gap-1.5 border-transparent bg-emerald-600/15 px-2.5 py-1 text-sm font-medium text-emerald-800 dark:text-emerald-300"
-        >
-          <Briefcase className="size-3.5" aria-hidden />
-          {triageQueue.filter((j) => j.decision === "apply").length} apply
-        </Badge>
-        <Badge
-          variant="outline"
-          className="gap-1.5 border-transparent bg-amber-500/15 px-2.5 py-1 text-sm font-medium text-amber-900 dark:text-amber-200"
-        >
-          <CircleHelp className="size-3.5" aria-hidden />
-          {triageQueue.filter((j) => j.decision === "maybe").length} maybe
-        </Badge>
+      {/* Summary line */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">{triageQueue.length}</span>
+        <span>jobs</span>
+        <span className="text-muted-foreground/30">·</span>
+        <span className="inline-flex items-center gap-1">
+          <span className="size-1.5 rounded-full bg-emerald-500" />
+          <span className="font-medium text-emerald-700 dark:text-emerald-400">{applyCount} apply</span>
+        </span>
+        <span className="text-muted-foreground/30">·</span>
+        <span className="inline-flex items-center gap-1">
+          <span className="size-1.5 rounded-full bg-amber-500" />
+          <span className="font-medium text-amber-700 dark:text-amber-400">{maybeCount} maybe</span>
+        </span>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {TRACK_FILTERS.map(({ key, label, icon: Icon }) => (
-          <Button
-            key={key}
-            type="button"
-            size="sm"
-            variant={filter === key ? "default" : "outline"}
-            className="min-h-11 gap-1.5"
-            onClick={() => setFilter(key)}
-          >
-            <Icon className="size-3.5" aria-hidden />
-            {label} {counts[key]}
-          </Button>
-        ))}
+      {/* Status filter pills */}
+      <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+        {TRACK_FILTERS.map(({ key, label, icon: Icon }) => {
+          const active = filter === key;
+          const count = counts[key];
+          const meta = TRACK_STATUS_META[key];
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setFilter(key)}
+              className={cn(
+                "flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all",
+                active
+                  ? cn(meta.className, "shadow-sm")
+                  : "border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground",
+                count === 0 && !active && "opacity-40",
+              )}
+            >
+              <Icon className="size-3 shrink-0" aria-hidden />
+              {label}
+              <span
+                className={cn(
+                  "min-w-[14px] text-center tabular-nums text-[10px] font-semibold",
+                  active ? "opacity-70" : "",
+                )}
+              >
+                {count}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {!visible.length ? (
@@ -280,297 +302,289 @@ export function ApplyQueue({
                 : job.trackNote || "";
             const busy = savingId === String(job.id);
 
+            // Prefer company/ATS URL when Stage 2 found one; else LinkedIn job page.
+            const jobHref = job.applyUrl || job.url || null;
+            const isEasyApply = Boolean(job.easyApply);
+            const noteIsOpen = noteOpen.has(String(job.id));
+
             return (
               <li
                 key={job.id}
-                className="rounded-xl border bg-card p-4 shadow-sm"
+                className="overflow-hidden rounded-xl border bg-card shadow-sm"
               >
-                <div className="flex gap-3">
-                  <CompanyLogo
-                    src={job.logoUrl}
-                    company={job.company}
-                    className="size-12"
-                  />
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <DecisionBadge decision={job.decision ?? null} />
-                      {job.fitScore != null ? (
-                        <Badge variant="secondary">Score {job.fitScore}</Badge>
-                      ) : null}
-                      <Badge variant="outline" className="font-normal">
-                        {job.easyApply ? (
-                          <span className="inline-flex items-center gap-1">
-                            <Briefcase className="size-3" aria-hidden />
-                            Likely Easy Apply
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1">
-                            <ExternalLink className="size-3" aria-hidden />
-                            Likely external site
-                          </span>
-                        )}
-                      </Badge>
-                    </div>
-                    <h3 className="text-base font-semibold leading-snug">
-                      {job.title || "Untitled"}
-                    </h3>
-                    <p className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
-                      <span>{[job.company, job.location].filter(Boolean).join(" · ")}</span>
-                      {job.posterType === "agency" ? (
-                        <span
-                          className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0 text-[10px] font-medium text-amber-700 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-400"
-                          title="Posted by a recruitment agency — the actual employer may not be named"
+                {/* ── HEADER ─────────────────────────────────── */}
+                <div className="flex gap-3 p-4 pb-3">
+                  {/* Logo — fixed square, cover-fit so all logos look uniform */}
+                  <div className="size-11 shrink-0 overflow-hidden rounded-lg bg-muted">
+                    <CompanyLogo
+                      src={job.logoUrl}
+                      company={job.company}
+                      className="size-11"
+                    />
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    {/* Title + open-job button (top-right, primary CTA) */}
+                    <div className="flex items-start justify-between gap-2">
+                      <h3 className="text-sm font-semibold leading-snug">
+                        {job.title || "Untitled"}
+                      </h3>
+                      {jobHref ? (
+                        <a
+                          href={jobHref}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={isEasyApply ? "Easy Apply" : "Open job posting"}
+                          className="inline-flex shrink-0 items-center justify-center rounded-full bg-foreground p-1.5 text-background transition-opacity hover:opacity-75"
                         >
-                          <UserRound className="size-2.5" />
-                          Agency
+                          {isEasyApply ? (
+                            <Briefcase className="size-3" aria-hidden />
+                          ) : (
+                            <ExternalLink className="size-3" aria-hidden />
+                          )}
+                        </a>
+                      ) : null}
+                    </div>
+
+                    {/* Company · Location + dump info icon */}
+                    <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                      <span className="min-w-0 truncate">
+                        {[job.company, job.location].filter(Boolean).join(" · ")}
+                      </span>
+                      {job.dumpName ? (
+                        <span
+                          className="shrink-0 cursor-default text-muted-foreground/40 hover:text-muted-foreground"
+                          title={`From: ${job.dumpName}`}
+                        >
+                          <Info className="size-3" aria-hidden />
                         </span>
                       ) : null}
                     </p>
-                    {job.dumpName ? (
-                      <p className="truncate font-mono text-[10px] text-muted-foreground/80">
-                        {job.dumpName}
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
 
-                <div className="mt-3 space-y-2">
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <p className="text-xs font-medium text-muted-foreground">
-                        Your status
-                      </p>
-                      <Select
-                        value={track}
-                        disabled={busy}
-                        onValueChange={(v) => {
-                          if (!v) return;
-                          const next = v as TrackStatus;
-                          void patchTrack(job, {
-                            trackStatus: next,
-                            applyChannel:
-                              next === "applied" && !job.applyChannel
-                                ? job.easyApply
-                                  ? "easy_apply"
-                                  : "external"
-                                : job.applyChannel,
-                          });
-                        }}
-                      >
-                        <SelectTrigger
-                          className={cn(
-                            "min-h-11 w-full border-transparent font-medium",
-                            TRACK_STATUS_META[track].className,
-                          )}
-                        >
-                          <SelectValue>
-                            {(value) => {
-                              const status = (value as TrackStatus) || track;
-                              const meta = TRACK_STATUS_META[status];
-                              const Icon = meta.icon;
-                              return (
-                                <span className="inline-flex items-center gap-2">
-                                  <Icon
-                                    className="size-3.5 shrink-0"
-                                    aria-hidden
-                                  />
-                                  {meta.label}
-                                </span>
-                              );
-                            }}
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {STATUS_OPTIONS.map((opt) => {
-                            const Icon = opt.icon;
-                            return (
-                              <SelectItem key={opt.value} value={opt.value}>
-                                <span className="inline-flex items-center gap-2">
-                                  <Icon
-                                    className="size-3.5 shrink-0"
-                                    aria-hidden
-                                  />
-                                  {opt.label}
-                                </span>
-                              </SelectItem>
-                            );
-                          })}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {(track === "applied" ||
-                      track === "waiting" ||
-                      job.applyChannel) && (
-                      <div className="space-y-1.5">
-                        <p className="text-xs font-medium text-muted-foreground">
-                          Channel
-                        </p>
-                        <Select
-                          value={job.applyChannel ?? null}
-                          disabled={busy}
-                          onValueChange={(v) => {
-                            if (!v) return;
-                            void patchTrack(job, {
-                              applyChannel: v as ApplyChannel,
-                            });
-                          }}
-                        >
-                          <SelectTrigger className="min-h-11 w-full font-medium">
-                            <SelectValue placeholder="How you applied…">
-                              {(value) => {
-                                const ch = value as ApplyChannel | null;
-                                const opt = CHANNEL_OPTIONS.find(
-                                  (o) => o.value === ch,
-                                );
-                                if (!opt) {
-                                  return (
-                                    <span className="text-muted-foreground">
-                                      How you applied…
-                                    </span>
-                                  );
-                                }
-                                return (
-                                  <span className="inline-flex items-center gap-2">
-                                    {opt.value === "easy_apply" ? (
-                                      <Briefcase
-                                        className="size-3.5 shrink-0"
-                                        aria-hidden
-                                      />
-                                    ) : opt.value === "external" ? (
-                                      <ExternalLink
-                                        className="size-3.5 shrink-0"
-                                        aria-hidden
-                                      />
-                                    ) : (
-                                      <MessageSquare
-                                        className="size-3.5 shrink-0"
-                                        aria-hidden
-                                      />
-                                    )}
-                                    {opt.label}
-                                  </span>
-                                );
-                              }}
-                            </SelectValue>
-                          </SelectTrigger>
-                          <SelectContent>
-                            {CHANNEL_OPTIONS.map((opt) => (
-                              <SelectItem key={opt.value} value={opt.value}>
-                                <span className="inline-flex items-center gap-2">
-                                  {opt.value === "easy_apply" ? (
-                                    <Briefcase
-                                      className="size-3.5 shrink-0"
-                                      aria-hidden
-                                    />
-                                  ) : opt.value === "external" ? (
-                                    <ExternalLink
-                                      className="size-3.5 shrink-0"
-                                      aria-hidden
-                                    />
-                                  ) : (
-                                    <MessageSquare
-                                      className="size-3.5 shrink-0"
-                                      aria-hidden
-                                    />
-                                  )}
-                                  {opt.label}
-                                </span>
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
-                  </div>
-                  <Input
-                    className="min-h-11"
-                    placeholder="Note (optional)"
-                    value={noteValue}
-                    disabled={busy}
-                    onChange={(e) =>
-                      setNoteDrafts((d) => ({
-                        ...d,
-                        [String(job.id)]: e.target.value,
-                      }))
-                    }
-                    onBlur={() => {
-                      const next = noteValue.trim();
-                      const prev = (job.trackNote || "").trim();
-                      if (next !== prev) {
-                        void patchTrack(job, { trackNote: next || null });
-                      }
-                    }}
-                  />
-                </div>
-
-                <div className="mt-3 grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2">
-                  {(() => {
-                    // Prefer company/ATS URL when Stage 2 found one; else LinkedIn job page.
-                    const href = job.applyUrl || job.url || null;
-                    if (!href) return <span />;
-                    const easy = Boolean(job.easyApply);
-                    const onSite = Boolean(job.applyUrl) && !easy;
-                    const label = easy
-                      ? "Easy Apply"
-                      : onSite
-                        ? "Apply on site"
-                        : "Open job";
-                    return (
-                      <a
-                        href={href}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-lg bg-foreground px-3 text-sm font-medium whitespace-nowrap text-background hover:opacity-90"
-                      >
-                        {easy ? (
-                          <Briefcase className="size-4 shrink-0" aria-hidden />
+                    {/* Badges row */}
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                      <DecisionBadge decision={job.decision ?? null} />
+                      {job.fitScore != null ? (
+                        <Badge variant="secondary" className="text-[11px]">
+                          {job.fitScore}
+                        </Badge>
+                      ) : null}
+                      <Badge variant="outline" className="text-[11px] font-normal">
+                        {isEasyApply ? (
+                          <span className="inline-flex items-center gap-1">
+                            <Briefcase className="size-2.5" aria-hidden />
+                            Easy Apply
+                          </span>
                         ) : (
-                          <ExternalLink className="size-4 shrink-0" aria-hidden />
+                          <span className="inline-flex items-center gap-1">
+                            <ExternalLink className="size-2.5" aria-hidden />
+                            External
+                          </span>
                         )}
-                        {label}
-                      </a>
-                    );
-                  })()}
-                  {/* Blue LinkedIn CTA — kept for easy restore if we want a dedicated LI button again.
-                  {job.url ? (
-                    <a
-                      href={job.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-lg bg-[#0A66C2] px-3 text-sm font-medium whitespace-nowrap text-white hover:bg-[#004182]"
+                      </Badge>
+                      {job.posterType === "agency" ? (
+                        <Badge
+                          variant="outline"
+                          className="border-amber-300 bg-amber-50 text-[11px] font-normal text-amber-700 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-400"
+                          title="Posted by a recruitment agency"
+                        >
+                          <UserRound className="size-2.5" aria-hidden />
+                          Agency
+                        </Badge>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── FOOTER ROW ─────────────────────────────── */}
+                <div className="flex items-center gap-1 border-t px-3 py-1.5">
+                  {/* Status select */}
+                  <Select
+                    value={track}
+                    disabled={busy}
+                    onValueChange={(v) => {
+                      if (!v) return;
+                      const next = v as TrackStatus;
+                      void patchTrack(job, {
+                        trackStatus: next,
+                        applyChannel:
+                          next === "applied" && !job.applyChannel
+                            ? job.easyApply
+                              ? "easy_apply"
+                              : "external"
+                            : job.applyChannel,
+                      });
+                    }}
+                  >
+                    <SelectTrigger
+                      className={cn(
+                        "h-6 w-auto shrink-0 rounded-full border-transparent px-2.5 text-[11px] font-medium",
+                        TRACK_STATUS_META[track].className,
+                      )}
                     >
-                      <LinkedInIcon className="size-4 shrink-0" />
-                      <span className="md:hidden">LinkedIn</span>
-                      <span className="hidden md:inline">Open LinkedIn</span>
-                    </a>
-                  ) : (
-                    <span />
-                  )}
-                  */}
-                  <Button
-                    variant="outline"
-                    className="min-h-11 shrink-0"
+                      <SelectValue>
+                        {(value) => {
+                          const status = (value as TrackStatus) || track;
+                          const meta = TRACK_STATUS_META[status];
+                          const Icon = meta.icon;
+                          return (
+                            <span className="inline-flex items-center gap-1">
+                              <Icon className="size-3 shrink-0" aria-hidden />
+                              {meta.label}
+                            </span>
+                          );
+                        }}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {STATUS_OPTIONS.map((opt) => {
+                        const Icon = opt.icon;
+                        return (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            <span className="inline-flex items-center gap-2">
+                              <Icon className="size-3.5 shrink-0" aria-hidden />
+                              {opt.label}
+                            </span>
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+
+                  {/* Channel select — only when relevant */}
+                  {(track === "applied" || track === "waiting" || job.applyChannel) ? (
+                    <Select
+                      value={job.applyChannel ?? null}
+                      disabled={busy}
+                      onValueChange={(v) => {
+                        if (!v) return;
+                        void patchTrack(job, { applyChannel: v as ApplyChannel });
+                      }}
+                    >
+                      <SelectTrigger className="h-6 w-auto shrink-0 rounded-full px-2.5 text-[11px] font-medium">
+                        <SelectValue placeholder="Channel…">
+                          {(value) => {
+                            const ch = value as ApplyChannel | null;
+                            const opt = CHANNEL_OPTIONS.find((o) => o.value === ch);
+                            if (!opt) return <span className="text-muted-foreground">Channel…</span>;
+                            return (
+                              <span className="inline-flex items-center gap-1">
+                                {opt.value === "easy_apply" ? (
+                                  <Briefcase className="size-2.5 shrink-0" aria-hidden />
+                                ) : opt.value === "external" ? (
+                                  <ExternalLink className="size-2.5 shrink-0" aria-hidden />
+                                ) : (
+                                  <MessageSquare className="size-2.5 shrink-0" aria-hidden />
+                                )}
+                                {opt.label}
+                              </span>
+                            );
+                          }}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CHANNEL_OPTIONS.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            <span className="inline-flex items-center gap-2">
+                              {opt.value === "easy_apply" ? (
+                                <Briefcase className="size-3.5 shrink-0" aria-hidden />
+                              ) : opt.value === "external" ? (
+                                <ExternalLink className="size-3.5 shrink-0" aria-hidden />
+                              ) : (
+                                <MessageSquare className="size-3.5 shrink-0" aria-hidden />
+                              )}
+                              {opt.label}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : null}
+
+                  {/* Note toggle */}
+                  <button
+                    type="button"
+                    title={noteValue ? `Note: ${noteValue}` : "Add note"}
+                    className={cn(
+                      "flex size-6 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-muted",
+                      noteIsOpen
+                        ? "bg-muted text-foreground"
+                        : noteValue
+                          ? "text-amber-600 dark:text-amber-400"
+                          : "text-muted-foreground"
+                    )}
+                    onClick={() =>
+                      setNoteOpen((prev) => {
+                        const next = new Set(prev);
+                        next.has(String(job.id)) ? next.delete(String(job.id)) : next.add(String(job.id));
+                        return next;
+                      })
+                    }
+                  >
+                    <PenLine className="size-3" aria-hidden />
+                  </button>
+
+                  {/* Spacer */}
+                  <div className="flex-1" />
+
+                  {/* Details */}
+                  <button
+                    type="button"
+                    className="rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                     onClick={() => onOpenJob(job)}
                   >
                     Details
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="min-h-11 shrink-0 gap-1.5 whitespace-nowrap"
+                  </button>
+
+                  {/* Materials toggle — fixed label, only chevron rotates */}
+                  <button
+                    type="button"
+                    className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                     aria-expanded={open}
                     onClick={() => setExpanded(open ? null : String(job.id))}
                   >
+                    Materials
                     <ChevronDown
                       className={cn(
-                        "size-4 shrink-0 transition-transform duration-200",
+                        "size-3 shrink-0 transition-transform duration-200",
                         open && "rotate-180",
                       )}
                       aria-hidden
                     />
-                    {open ? "Hide" : "Materials"}
-                  </Button>
+                  </button>
                 </div>
 
+                {/* ── NOTE EXPAND ────────────────────────────── */}
+                <div
+                  className={cn(
+                    "grid transition-[grid-template-rows] duration-150 ease-out",
+                    noteIsOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+                  )}
+                >
+                  <div className="overflow-hidden">
+                    <div className="border-t px-3 py-2">
+                      <Input
+                        className="h-8 text-xs"
+                        placeholder="Note (optional)"
+                        value={noteValue}
+                        disabled={busy}
+                        autoFocus={noteIsOpen}
+                        onChange={(e) =>
+                          setNoteDrafts((d) => ({ ...d, [String(job.id)]: e.target.value }))
+                        }
+                        onBlur={() => {
+                          const next = noteValue.trim();
+                          const prev = (job.trackNote || "").trim();
+                          if (next !== prev) {
+                            void patchTrack(job, { trackNote: next || null });
+                          }
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── MATERIALS EXPAND ───────────────────────── */}
                 <div
                   className={cn(
                     "grid transition-[grid-template-rows] duration-200 ease-out",
@@ -580,7 +594,7 @@ export function ApplyQueue({
                   <div className="overflow-hidden">
                     <div
                       className={cn(
-                        "mt-3 space-y-3 border-t pt-3 transition-opacity duration-200",
+                        "space-y-3 border-t px-4 pb-4 pt-3 transition-opacity duration-200",
                         open ? "opacity-100" : "opacity-0",
                       )}
                     >
@@ -632,8 +646,7 @@ export function ApplyQueue({
                       ) : null}
                       {!outreach && !cover ? (
                         <p className="text-sm text-muted-foreground">
-                          No materials yet (skipped generate or not
-                          apply/maybe).
+                          No materials yet — open Details to generate them.
                         </p>
                       ) : null}
                       {recommendation ? (

@@ -783,6 +783,19 @@ export function TriageApp() {
         job={selectedJob}
         open={sheetOpen}
         onOpenChange={setSheetOpen}
+        onJobUpdated={(patch) => {
+          setDetail((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              jobs: prev.jobs.map((j) =>
+                String(j.id) === String(patch.id ?? selectedId)
+                  ? { ...j, ...patch }
+                  : j
+              ),
+            };
+          });
+        }}
       />
 
       {view === "dashboard" ? <Dashboard /> : null}

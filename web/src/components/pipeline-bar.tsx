@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -186,6 +187,21 @@ function kindLabel(kind: PipelineJob["kind"] | undefined) {
   return "Pipeline";
 }
 
+function isBatchKind(kind: PipelineJob["kind"] | undefined) {
+  return kind === "parse-batch" || kind === "fetch-batch" || kind === "stage3-batch";
+}
+
+/** Compress the raw phase string into a compact chip label segment. */
+function phaseLabel(phase: string | undefined, kind: PipelineJob["kind"] | undefined): string {
+  if (!phase) return "running";
+  // Batch phases arrive as "batch-stage3 2/23" — strip the kind prefix
+  const progress = phase.replace(/^batch-\w+\s*/, "");
+  if (isBatchKind(kind)) {
+    return `Batch · ${progress || "running"}`;
+  }
+  return phase;
+}
+
 function toggleInSet(prev: Set<string>, name: string) {
   const next = new Set(prev);
   if (next.has(name)) next.delete(name);
@@ -247,6 +263,11 @@ export function PipelineBar({
   const [stage3Limit, setStage3Limit] = useState("");
   const [force, setForce] = useState(false);
   const [skipGenerate, setSkipGenerate] = useState(false);
+  const [generateMaybe, setGenerateMaybe] = useState(false);
+  const [generateCoverLetter, setGenerateCoverLetter] = useState(false);
+  const [generateOutreach, setGenerateOutreach] = useState(true);
+  const [generateStrategy, setGenerateStrategy] = useState(false);
+  const [descMaxChars, setDescMaxChars] = useState("8000");
   const [noPause, setNoPause] = useState(true);
   const [headless, setHeadless] = useState(false);
   const [forceFetch, setForceFetch] = useState(false);
@@ -560,10 +581,10 @@ export function PipelineBar({
   const isRunning = busy || job?.status === "running";
   const showLogChrome = isRunning || logs.length > 0 || Boolean(job);
   const fabLabel = isRunning
-    ? `${kindLabel(job?.kind)} · ${job?.phase || "running"}`
+    ? `${kindLabel(job?.kind)} · ${phaseLabel(job?.phase, job?.kind)}`
     : job
       ? `${kindLabel(job.kind)} · ${job.status}${
-          job.exitCode != null ? ` · ${job.exitCode}` : ""
+          job.exitCode != null ? ` · exit ${job.exitCode}` : ""
         }`
       : "Pipeline log";
 
@@ -978,6 +999,7 @@ export function PipelineBar({
               />
             </div>
             <div className="flex flex-col gap-2">
+              {/* Force */}
               <label className="flex min-h-11 items-center gap-2 text-sm">
                 <Checkbox
                   checked={force}
@@ -985,13 +1007,75 @@ export function PipelineBar({
                 />
                 Force
               </label>
-              <label className="flex min-h-11 items-center gap-2 text-sm">
-                <Checkbox
-                  checked={skipGenerate}
-                  onCheckedChange={(v) => setSkipGenerate(v === true)}
-                />
-                Skip generate
-              </label>
+
+              {/* Material generation options — hidden when skip is on */}
+              <div className={cn("mt-1 flex flex-col gap-2 border-t pt-2", skipGenerate && "pointer-events-none opacity-40")}>
+                <label
+                  className="flex min-h-11 items-center gap-2 text-sm"
+                  title="Also generate materials for 'maybe' decisions (uses ~2× more tokens)."
+                >
+                  <Checkbox
+                    checked={generateMaybe}
+                    onCheckedChange={(v) => setGenerateMaybe(v === true)}
+                  />
+                  Include maybe
+                </label>
+                <label
+                  className="flex min-h-11 items-center gap-2 text-sm"
+                  title="Generate outreach messages for each apply decision."
+                >
+                  <Checkbox
+                    checked={generateOutreach}
+                    onCheckedChange={(v) => setGenerateOutreach(v === true)}
+                  />
+                  Outreach messages
+                </label>
+                <label
+                  className="flex min-h-11 items-center gap-2 text-sm"
+                  title="Generate cover letters. Off by default — generate per-job on demand instead."
+                >
+                  <Checkbox
+                    checked={generateCoverLetter}
+                    onCheckedChange={(v) => setGenerateCoverLetter(v === true)}
+                  />
+                  Cover letters
+                </label>
+                <label
+                  className="flex min-h-11 items-center gap-2 text-sm"
+                  title="Generate application strategy. Off by default — generate per-job on demand instead."
+                >
+                  <Checkbox
+                    checked={generateStrategy}
+                    onCheckedChange={(v) => setGenerateStrategy(v === true)}
+                  />
+                  Strategy
+                </label>
+                <div className="flex min-h-11 items-center gap-2">
+                  <Label className="shrink-0 text-xs text-muted-foreground">Desc cap (chars)</Label>
+                  <Input
+                    className="h-9 min-h-9 w-24 text-sm"
+                    inputMode="numeric"
+                    value={descMaxChars}
+                    onChange={(e) => setDescMaxChars(e.target.value)}
+                    placeholder="8000"
+                    title="Max characters of job description to send to Claude (0 = no cap)."
+                  />
+                </div>
+              </div>
+
+              {/* Separator + skip override */}
+              <div className="mt-1 border-t pt-2">
+                <label
+                  className="flex min-h-11 items-center gap-2 text-sm text-muted-foreground"
+                  title="Skip all Claude material generation entirely — no cover letters, no outreach, no questions."
+                >
+                  <Checkbox
+                    checked={skipGenerate}
+                    onCheckedChange={(v) => setSkipGenerate(v === true)}
+                  />
+                  Skip all materials
+                </label>
+              </div>
             </div>
             <BatchDisclosure
               label="Batch run…"
@@ -1080,6 +1164,11 @@ export function PipelineBar({
                       limit: Number(stage3Limit) || undefined,
                       force,
                       skipGenerate,
+                      generateMaybe,
+                      generateCoverLetter,
+                      generateOutreach,
+                      generateStrategy,
+                      descMaxChars: Number(descMaxChars) || 8000,
                     },
                     `Batch stage3 (${selectedStage3.size})`
                   );
@@ -1092,6 +1181,11 @@ export function PipelineBar({
                     limit: Number(stage3Limit) || undefined,
                     force,
                     skipGenerate,
+                    generateMaybe,
+                    generateCoverLetter,
+                    generateOutreach,
+                    generateStrategy,
+                    descMaxChars: Number(descMaxChars) || 8000,
                   },
                   "Stage 3"
                 );
@@ -1108,16 +1202,16 @@ export function PipelineBar({
 
       {showLogChrome ? (
         <>
-          {/* Collapsed chip — stays mounted for exit animation */}
+          {/* Collapsed chip — top-right corner */}
           <button
             type="button"
             className={cn(
               "fixed z-50 flex max-w-[min(18rem,calc(100vw-1.5rem))] items-center gap-2 rounded-full border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm text-zinc-100 shadow-lg",
-              "right-4 bottom-20 md:right-4 md:bottom-20",
-              "origin-bottom-right transition-[opacity,transform] duration-300 ease-out",
+              "right-3 top-3",
+              "origin-top-right transition-[opacity,transform] duration-300 ease-out",
               logOpen
-                ? "pointer-events-none scale-90 translate-y-2 opacity-0"
-                : "scale-100 translate-y-0 opacity-100"
+                ? "pointer-events-none -translate-y-2 scale-90 opacity-0"
+                : "translate-y-0 scale-100 opacity-100"
             )}
             onClick={() => setLogOpen(true)}
             aria-label="Open pipeline log"
@@ -1132,15 +1226,18 @@ export function PipelineBar({
             <span className="min-w-0 truncate">{fabLabel}</span>
           </button>
 
-          {/* Expanded panel */}
+          {/* Expanded panel — anchored top-right, stretches to bottom of viewport */}
           <div
             className={cn(
-              "fixed z-50 flex max-h-[50vh] flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950 shadow-xl",
-              "left-3 right-4 bottom-20 md:left-auto md:w-[min(28rem,calc(100vw-2rem))] md:right-4 md:bottom-20",
-              "origin-bottom-right transition-[opacity,transform] duration-300 ease-out",
+              "fixed z-50 flex flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950 shadow-xl",
+              // Mobile: near-full width, stays above the bottom nav (≈80px)
+              // Desktop: fixed width, leaves a little breathing room at bottom
+              "left-3 right-3 top-3 bottom-20",
+              "md:left-auto md:w-[min(32rem,calc(100vw-2rem))] md:right-3 md:top-3 md:bottom-3",
+              "origin-top-right transition-[opacity,transform] duration-300 ease-out",
               logOpen
-                ? "pointer-events-auto scale-100 translate-y-0 opacity-100"
-                : "pointer-events-none scale-95 translate-y-3 opacity-0"
+                ? "pointer-events-auto translate-y-0 scale-100 opacity-100"
+                : "pointer-events-none -translate-y-3 scale-95 opacity-0"
             )}
             role="dialog"
             aria-label="Pipeline log"

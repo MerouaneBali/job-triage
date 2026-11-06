@@ -17,6 +17,7 @@ export async function POST(req: Request) {
       generateOutreach?: boolean;
       generateStrategy?: boolean;
       descMaxChars?: number;
+      maxAgeDays?: number;
     };
     const dumpNames = (body.dumpNames || [])
       .map((n) => safeBasename(n))
@@ -36,6 +37,7 @@ export async function POST(req: Request) {
       generateOutreach: Boolean(body.generateOutreach),
       generateStrategy: Boolean(body.generateStrategy),
       descMaxChars: body.descMaxChars,
+      maxAgeDays: body.maxAgeDays,
     });
     return NextResponse.json({ job });
   } catch (e) {

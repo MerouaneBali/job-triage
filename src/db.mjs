@@ -92,6 +92,7 @@ function migrateSchema(db) {
   `);
 
   ensureJobsTrackColumns(db);
+  ensureUsageLog(db);
 }
 
 /** Create usage_log table if it doesn't exist (safe to call repeatedly). */

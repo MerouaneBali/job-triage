@@ -488,20 +488,16 @@ export function Dashboard() {
           </div>
 
           {/* ── Claude Usage ───────────────────────────────────────────── */}
-          {(data.usage.length > 0 || data.usageByDay.length > 0) && (() => {
+          {(() => {
             const totalIn = data.usage.reduce((s, r) => s + r.inputTokens, 0);
             const totalOut = data.usage.reduce((s, r) => s + r.outputTokens, 0);
             const totalCost = data.usage.reduce((s, r) => s + estimateCost(r), 0);
             const totalCalls = data.usage.reduce((s, r) => s + r.calls, 0);
-
-            const maxDailyTokens = Math.max(
-              ...data.usageByDay.map((d) => d.inputTokens + d.outputTokens),
-              1,
-            );
+            const hasData = data.usage.length > 0;
 
             return (
               <div className="mt-2 space-y-3">
-                <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                   <Zap className="size-3.5" />
                   Claude Usage
                 </h2>
@@ -515,8 +511,8 @@ export function Dashboard() {
                 </div>
 
                 {/* Daily token chart (last 30 days) */}
-                {data.usageByDay.length > 0 && (
-                  <Card title="Daily tokens (last 30 days)">
+                <Card title="Daily tokens (last 30 days)">
+                  {data.usageByDay.length > 0 ? (
                     <BarChart
                       bars={data.usageByDay.map((d) => ({
                         label: d.date.slice(5), // MM-DD
@@ -526,48 +522,60 @@ export function Dashboard() {
                       color="#8b5cf6"
                       labelEvery={7}
                     />
-                  </Card>
-                )}
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      No usage recorded yet — tracking starts on your next Stage 3 run.
+                    </p>
+                  )}
+                </Card>
 
                 {/* Breakdown by model + stage */}
                 <Card title="Breakdown by model & stage">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="border-b text-left text-muted-foreground">
-                          <th className="pb-1.5 pr-4 font-medium">Model</th>
-                          <th className="pb-1.5 pr-4 font-medium">Stage</th>
-                          <th className="pb-1.5 pr-4 font-medium text-right">Calls</th>
-                          <th className="pb-1.5 pr-4 font-medium text-right">Input</th>
-                          <th className="pb-1.5 pr-4 font-medium text-right">Output</th>
-                          <th className="pb-1.5 font-medium text-right">Est. cost</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {data.usage.map((row, i) => (
-                          <tr key={i} className="text-foreground">
-                            <td className="py-1.5 pr-4 font-mono">{row.model}</td>
-                            <td className="py-1.5 pr-4 capitalize text-muted-foreground">{row.stage}</td>
-                            <td className="py-1.5 pr-4 text-right tabular-nums">{row.calls}</td>
-                            <td className="py-1.5 pr-4 text-right tabular-nums">{fmtTokens(row.inputTokens)}</td>
-                            <td className="py-1.5 pr-4 text-right tabular-nums">{fmtTokens(row.outputTokens)}</td>
-                            <td className="py-1.5 text-right tabular-nums font-medium">{fmtCost(estimateCost(row))}</td>
-                          </tr>
-                        ))}
-                        <tr className="border-t font-semibold">
-                          <td colSpan={2} className="pt-2 text-muted-foreground">Total</td>
-                          <td className="pt-2 text-right tabular-nums">{totalCalls}</td>
-                          <td className="pt-2 text-right tabular-nums">{fmtTokens(totalIn)}</td>
-                          <td className="pt-2 text-right tabular-nums">{fmtTokens(totalOut)}</td>
-                          <td className="pt-2 text-right tabular-nums">{fmtCost(totalCost)}</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                  <p className="mt-2 text-[10px] text-muted-foreground">
-                    Cost estimates based on published Anthropic pricing. Actual charges may differ.
-                    Only tracks usage made through this tool.
-                  </p>
+                  {hasData ? (
+                    <>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="border-b text-left text-muted-foreground">
+                              <th className="pb-1.5 pr-4 font-medium">Model</th>
+                              <th className="pb-1.5 pr-4 font-medium">Stage</th>
+                              <th className="pb-1.5 pr-4 font-medium text-right">Calls</th>
+                              <th className="pb-1.5 pr-4 font-medium text-right">Input</th>
+                              <th className="pb-1.5 pr-4 font-medium text-right">Output</th>
+                              <th className="pb-1.5 font-medium text-right">Est. cost</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y">
+                            {data.usage.map((row, i) => (
+                              <tr key={i} className="text-foreground">
+                                <td className="py-1.5 pr-4 font-mono">{row.model}</td>
+                                <td className="py-1.5 pr-4 capitalize text-muted-foreground">{row.stage}</td>
+                                <td className="py-1.5 pr-4 text-right tabular-nums">{row.calls}</td>
+                                <td className="py-1.5 pr-4 text-right tabular-nums">{fmtTokens(row.inputTokens)}</td>
+                                <td className="py-1.5 pr-4 text-right tabular-nums">{fmtTokens(row.outputTokens)}</td>
+                                <td className="py-1.5 text-right tabular-nums font-medium">{fmtCost(estimateCost(row))}</td>
+                              </tr>
+                            ))}
+                            <tr className="border-t font-semibold">
+                              <td colSpan={2} className="pt-2 text-muted-foreground">Total</td>
+                              <td className="pt-2 text-right tabular-nums">{totalCalls}</td>
+                              <td className="pt-2 text-right tabular-nums">{fmtTokens(totalIn)}</td>
+                              <td className="pt-2 text-right tabular-nums">{fmtTokens(totalOut)}</td>
+                              <td className="pt-2 text-right tabular-nums">{fmtCost(totalCost)}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                      <p className="mt-2 text-[10px] text-muted-foreground">
+                        Cost estimates based on published Anthropic pricing. Actual charges may differ.
+                        Only tracks usage made through this tool, from this session onward.
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      No breakdown yet — run Stage 3 to start tracking per-model usage.
+                    </p>
+                  )}
                 </Card>
               </div>
             );

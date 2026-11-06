@@ -267,6 +267,7 @@ export function PipelineBar({
   const [generateCoverLetter, setGenerateCoverLetter] = useState(false);
   const [generateOutreach, setGenerateOutreach] = useState(true);
   const [generateStrategy, setGenerateStrategy] = useState(false);
+  const [maxAgeDays, setMaxAgeDays] = useState("30");
   const [descMaxChars, setDescMaxChars] = useState("8000");
   const [noPause, setNoPause] = useState(true);
   const [headless, setHeadless] = useState(false);
@@ -1061,6 +1062,17 @@ export function PipelineBar({
                     title="Max characters of job description to send to Claude (0 = no cap)."
                   />
                 </div>
+                <div className="flex min-h-11 items-center gap-2">
+                  <Label className="shrink-0 text-xs text-muted-foreground">Max job age (days)</Label>
+                  <Input
+                    className="h-9 min-h-9 w-20 text-sm"
+                    inputMode="numeric"
+                    value={maxAgeDays}
+                    onChange={(e) => setMaxAgeDays(e.target.value)}
+                    placeholder="30"
+                    title="Skip jobs posted more than N days ago — they're likely already filled. 0 = no limit."
+                  />
+                </div>
               </div>
 
               {/* Separator + skip override */}
@@ -1169,6 +1181,7 @@ export function PipelineBar({
                       generateOutreach,
                       generateStrategy,
                       descMaxChars: Number(descMaxChars) || 8000,
+                      maxAgeDays: Number(maxAgeDays) || 30,
                     },
                     `Batch stage3 (${selectedStage3.size})`
                   );
@@ -1186,6 +1199,7 @@ export function PipelineBar({
                     generateOutreach,
                     generateStrategy,
                     descMaxChars: Number(descMaxChars) || 8000,
+                    maxAgeDays: Number(maxAgeDays) || 30,
                   },
                   "Stage 3"
                 );

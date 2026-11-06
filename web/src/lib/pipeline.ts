@@ -471,6 +471,7 @@ export function startFetch(
     noPause?: boolean;
     headless?: boolean;
     force?: boolean;
+    maxAgeDays?: number;
   } = {}
 ): PipelineJob {
   const stem = dumpName.replace(/\.json$/i, "");
@@ -484,6 +485,7 @@ export function startFetch(
   if (opts.noPause !== false) args.push("--no-pause");
   if (opts.headless) args.push("--headless");
   if (opts.force) args.push("--force");
+  if (opts.maxAgeDays != null) args.push("--max-age-days", String(opts.maxAgeDays));
   return startChild("fetch", args, "fetch-details");
 }
 
@@ -501,6 +503,7 @@ type Stage3Opts = {
   generateOutreach?: boolean;
   generateStrategy?: boolean;
   descMaxChars?: number;
+  maxAgeDays?: number;
 };
 
 function buildStage3Args(stem: string, opts: Stage3Opts): string[] {
@@ -516,6 +519,9 @@ function buildStage3Args(stem: string, opts: Stage3Opts): string[] {
   if (opts.generateStrategy) args.push("--generate-strategy");
   if (opts.descMaxChars != null && opts.descMaxChars >= 0) {
     args.push("--max-desc-chars", String(opts.descMaxChars));
+  }
+  if (opts.maxAgeDays != null) {
+    args.push("--max-age-days", String(opts.maxAgeDays));
   }
   return args;
 }

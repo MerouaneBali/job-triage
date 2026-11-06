@@ -76,6 +76,8 @@ const headless = args.includes("--headless");
 const noPause = args.includes("--no-pause");
 const force = args.includes("--force");
 const reparseOnly = args.includes("--reparse-only");
+const maxAgeIdx2 = args.indexOf("--max-age-days");
+const MAX_AGE_DAYS_S2 = maxAgeIdx2 >= 0 ? Number(args[maxAgeIdx2 + 1]) : 30;
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -228,6 +230,19 @@ const doneIds = new Set(
 let pending = cardJobs.filter(
   (j) => j.id && j.url && (force || !doneIds.has(j.id))
 );
+
+// Skip jobs older than MAX_AGE_DAYS_S2 — they're likely already filled
+if (Number.isFinite(MAX_AGE_DAYS_S2) && MAX_AGE_DAYS_S2 > 0) {
+  const cutoff = new Date(Date.now() - MAX_AGE_DAYS_S2 * 86_400_000);
+  const beforeAge = pending.length;
+  pending = pending.filter((j) => {
+    if (!j.postedAt) return true; // no date info — include
+    return new Date(j.postedAt) >= cutoff;
+  });
+  if (pending.length < beforeAge)
+    console.log(`Skipping ${beforeAge - pending.length} jobs older than ${MAX_AGE_DAYS_S2} days.`);
+}
+
 if (Number.isFinite(limit)) pending = pending.slice(0, limit);
 
 console.log(

@@ -68,6 +68,8 @@ const maxErrorsIdx = args.indexOf("--max-errors");
 const maxConsecutiveErrors = maxErrorsIdx >= 0 ? Number(args[maxErrorsIdx + 1]) : 3;
 const maxDescIdx = args.indexOf("--max-desc-chars");
 const MAX_DESC_CHARS = maxDescIdx >= 0 ? Number(args[maxDescIdx + 1]) : 8_000;
+const maxAgeIdx = args.indexOf("--max-age-days");
+const MAX_AGE_DAYS = maxAgeIdx >= 0 ? Number(args[maxAgeIdx + 1]) : 30;
 
 /** Flatten drainUsage() result into logUsage() param names. */
 function flattenUsage(u) {
@@ -184,6 +186,26 @@ if (qualifyOnly) {
 }
 
 let toEval = qualified.filter((j) => j.qualify.eligibility === "pass");
+
+// Skip jobs older than MAX_AGE_DAYS (likely already filled)
+if (Number.isFinite(MAX_AGE_DAYS) && MAX_AGE_DAYS > 0) {
+  const cutoff = new Date(Date.now() - MAX_AGE_DAYS * 86_400_000);
+  const before = toEval.length;
+  toEval = toEval.filter((j) => {
+    if (!j.postedAt) return true; // no date = include (can't tell)
+    const posted = new Date(j.postedAt);
+    if (posted < cutoff) {
+      console.log(
+        `  skipping "${j.title}" @ ${j.company} — posted ${Math.round((Date.now() - posted.getTime()) / 86_400_000)}d ago (older than ${MAX_AGE_DAYS}d)`
+      );
+      return false;
+    }
+    return true;
+  });
+  if (toEval.length < before)
+    console.log(`Skipped ${before - toEval.length} stale jobs (older than ${MAX_AGE_DAYS} days). ${toEval.length} remaining.`);
+}
+
 if (Number.isFinite(limit)) toEval = toEval.slice(0, limit);
 
 const cache = openCache(defaultDbPath());

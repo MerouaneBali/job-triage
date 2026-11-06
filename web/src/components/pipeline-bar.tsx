@@ -272,7 +272,7 @@ export function PipelineBar({
   const [noPause, setNoPause] = useState(true);
   const [headless, setHeadless] = useState(false);
   const [forceFetch, setForceFetch] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const [uploading, setUploading] = useState<{ current: number; total: number } | false>(false);
   const [selectedHtml, setSelectedHtml] = useState<Set<string>>(() => new Set());
   const [selectedFetch, setSelectedFetch] = useState<Set<string>>(() => new Set());
   const [selectedStage3, setSelectedStage3] = useState<Set<string>>(() => new Set());
@@ -540,36 +540,49 @@ export function PipelineBar({
     }
   }
 
-  async function onUpload(file: File | null) {
-    if (!file) return;
-    setUploading(true);
+  async function onUpload(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const fileArr = Array.from(files);
+    setUploading({ current: 0, total: fileArr.length });
+    let lastJob: PipelineJob | undefined;
+    let lastHtmlName: string | undefined;
     try {
-      const form = new FormData();
-      form.set("file", file);
-      form.set("parse", "true");
-      const res = await fetch("/api/dumps/upload", {
-        method: "POST",
-        body: form,
-      });
-      const data = (await res.json()) as {
-        htmlName?: string;
-        job?: PipelineJob;
-        error?: string;
-      };
-      if (!res.ok) {
-        toast.error(data.error || "Upload failed");
-        return;
+      for (let i = 0; i < fileArr.length; i++) {
+        setUploading({ current: i + 1, total: fileArr.length });
+        const file = fileArr[i];
+        const form = new FormData();
+        form.set("file", file);
+        form.set("parse", "true");
+        const res = await fetch("/api/dumps/upload", {
+          method: "POST",
+          body: form,
+        });
+        const data = (await res.json()) as {
+          htmlName?: string;
+          convertedFromMht?: boolean;
+          job?: PipelineJob;
+          error?: string;
+        };
+        if (!res.ok) {
+          toast.error(`${file.name}: ${data.error || "Upload failed"}`);
+          continue;
+        }
+        const label = data.convertedFromMht
+          ? `${data.htmlName} (converted from MHT)`
+          : data.htmlName;
+        toast.success(fileArr.length > 1 ? `${i + 1}/${fileArr.length} — ${label}` : `Uploaded ${label}`);
+        if (data.htmlName) lastHtmlName = data.htmlName;
+        if (data.job) lastJob = data.job;
       }
-      toast.success(`Uploaded ${data.htmlName}`);
       await refreshHtml();
-      if (data.htmlName) {
-        setHtmlName(data.htmlName);
-        onDumpReady?.(stemFromHtmlName(data.htmlName));
+      if (lastHtmlName) {
+        setHtmlName(lastHtmlName);
+        onDumpReady?.(stemFromHtmlName(lastHtmlName));
       }
-      if (data.job) {
-        setJob(data.job);
+      if (lastJob) {
+        setJob(lastJob);
         setLogOpen(true);
-        attachStream(data.job.id);
+        attachStream(lastJob.id);
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Upload failed");
@@ -626,19 +639,24 @@ export function PipelineBar({
             <input
               ref={fileRef}
               type="file"
-              accept=".html,.htm,text/html"
+              accept=".html,.htm,.mht,.mhtml,text/html,message/rfc822"
+              multiple
               className="sr-only"
-              onChange={(e) => void onUpload(e.target.files?.[0] ?? null)}
+              onChange={(e) => void onUpload(e.target.files)}
             />
             <Button
               type="button"
               variant="outline"
               className="min-h-11 w-full"
-              disabled={busy || uploading}
+              disabled={busy || !!uploading}
               onClick={() => fileRef.current?.click()}
             >
               <Upload data-icon="inline-start" />
-              {uploading ? "Uploading…" : "Upload HTML"}
+              {uploading
+                ? uploading.total > 1
+                  ? `Uploading ${uploading.current}/${uploading.total}…`
+                  : "Uploading…"
+                : "Upload HTML / MHT"}
             </Button>
             <Select
               key={htmlDumps.map((d) => d.name).join("|") || "empty"}

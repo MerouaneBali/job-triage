@@ -77,6 +77,8 @@ export type JobRow = {
   applyUrl?: string | null;
   /** Dump stem when loaded from All-dumps inbox. */
   dumpName?: string | null;
+  /** Whether the job was posted by a recruitment agency ('agency') or direct employer ('direct'). Null = unknown. */
+  posterType?: "agency" | "direct" | null;
 };
 
 export const ALL_DUMPS = "__all__";

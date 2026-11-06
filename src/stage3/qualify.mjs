@@ -16,7 +16,11 @@ const US_ONLY =
 const CLEARANCE =
   /\b(sc cleared|security clearance|dv cleared|must hold clearance)\b/i;
 const AGENCY_SIGNAL =
-  /\b(recruitment agency|recruiting partner|on behalf of (our )?client|no agencies please)\b/i;
+  /\b(recruitment agency|recruiting partner|on behalf of (our )?client|our client is|my client (is|seeks|want)|no agencies please)\b/i;
+
+/** Catch recruiter language in company name itself (without needing description). */
+const AGENCY_COMPANY_RE =
+  /\b(?:recruitment|resourcing|staffing|talent\s*hop|headhunt|hiring\s*partner|consult(?:ing|ancy)|placements?|search\s*firm)\b/i;
 
 /**
  * @param {object} job merged job
@@ -45,7 +49,8 @@ export function qualifyJob(job, prefs = {}) {
   const ukRtw = UK_ONLY_RTW.test(text);
   const usOnly = US_ONLY.test(text);
   const clearance = CLEARANCE.test(text);
-  const agency = AGENCY_SIGNAL.test(text);
+  const agency =
+    AGENCY_SIGNAL.test(text) || AGENCY_COMPANY_RE.test(job.company || "");
 
   const signals = {
     remoteInLocation,

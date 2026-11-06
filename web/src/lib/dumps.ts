@@ -201,6 +201,7 @@ function rowToJob(row: Record<string, unknown>): JobRow {
     trackedAt: (row.tracked_at as string) ?? null,
     appliedAt: (row.applied_at as string) ?? null,
     source: (row.source as string) ?? "linkedin_job",
+    posterType: (row.poster_type as "agency" | "direct" | null) ?? null,
     applyUrl: (row.apply_url as string) ?? null,
   };
 }

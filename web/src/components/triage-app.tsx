@@ -34,7 +34,7 @@ import {
 } from "@/components/dump-health";
 import { ALL_DUMPS, type DumpDetail, type DumpSummary, type JobRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { Briefcase, LayoutDashboard, ListFilter, RefreshCw, Workflow } from "lucide-react";
+import { Briefcase, LayoutDashboard, ListFilter, RefreshCw, UserRound, Workflow } from "lucide-react";
 import { toast } from "sonner";
 import { Dashboard } from "@/components/dashboard";
 
@@ -421,9 +421,6 @@ export function TriageApp() {
             variant={view === key ? "default" : "outline"}
             className="min-h-11"
             onClick={() => {
-              if (key === "triage" && dumpName === ALL_DUMPS && dumps[0]) {
-                setDumpName(dumps[0].name);
-              }
               setView(key);
             }}
           >
@@ -722,9 +719,17 @@ export function TriageApp() {
                       {job.title || "—"}
                     </TableCell>
                     <TableCell>
-                      <div className="flex max-w-[200px] items-center gap-2">
-                        <CompanyLogo src={job.logoUrl} company={job.company} />
-                        <span className="truncate">{job.company || "—"}</span>
+                      <div className="flex max-w-[200px] flex-col gap-0.5">
+                        <div className="flex items-center gap-2">
+                          <CompanyLogo src={job.logoUrl} company={job.company} />
+                          <span className="truncate">{job.company || "—"}</span>
+                        </div>
+                        {job.posterType === "agency" ? (
+                          <span className="inline-flex w-fit items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0 text-[10px] font-medium text-amber-700 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
+                            <UserRound className="size-2.5" />
+                            Agency
+                          </span>
+                        ) : null}
                       </div>
                     </TableCell>
                     <TableCell className="max-w-[160px] truncate text-muted-foreground">
@@ -803,9 +808,6 @@ export function TriageApp() {
                   : "text-muted-foreground"
               )}
               onClick={() => {
-                if (key === "triage" && dumpName === ALL_DUMPS && dumps[0]) {
-                  setDumpName(dumps[0].name);
-                }
                 setView(key);
               }}
             >

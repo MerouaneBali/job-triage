@@ -112,6 +112,7 @@ export function ensureJobsTrackColumns(db) {
   add("applied_at", "TEXT");
   add("source", "TEXT");
   add("apply_url", "TEXT");
+  add("poster_type", "TEXT"); // 'direct' | 'agency' | null
 
   db.exec(`
     UPDATE jobs SET source = 'linkedin_job' WHERE source IS NULL OR source = '';
@@ -254,10 +255,10 @@ export function upsertJobCard(db, dumpId, job) {
   db.prepare(`
     INSERT INTO jobs (
       dump_id, job_id, title, company, location, salary, posted, posted_raw, posted_at,
-      easy_apply, early_applicant, verified, logo_url, url, source
+      easy_apply, early_applicant, verified, logo_url, url, source, poster_type
     ) VALUES (
       @dump_id, @job_id, @title, @company, @location, @salary, @posted, @posted_raw, @posted_at,
-      @easy_apply, @early_applicant, @verified, @logo_url, @url, @source
+      @easy_apply, @early_applicant, @verified, @logo_url, @url, @source, @poster_type
     )
     ON CONFLICT(dump_id, job_id) DO UPDATE SET
       title = excluded.title,
@@ -272,7 +273,8 @@ export function upsertJobCard(db, dumpId, job) {
       verified = excluded.verified,
       logo_url = excluded.logo_url,
       url = excluded.url,
-      source = COALESCE(jobs.source, excluded.source)
+      source = COALESCE(jobs.source, excluded.source),
+      poster_type = COALESCE(excluded.poster_type, jobs.poster_type)
   `).run({
     dump_id: dumpId,
     job_id: String(job.id),
@@ -289,6 +291,7 @@ export function upsertJobCard(db, dumpId, job) {
     logo_url: job.logoUrl ?? null,
     url: job.url ?? null,
     source: job.source ?? "linkedin_job",
+    poster_type: job.posterType ?? null,
   });
 }
 
@@ -321,6 +324,9 @@ export function updateJobDetail(db, dumpId, jobId, detail) {
 export function updateJobTriage(db, dumpId, jobId, triage) {
   const decision = triage.decision ?? null;
   const stamp = nowIso();
+  // Derive poster_type from qualify signals if not already set
+  const agencyFromSignals =
+    triage.qualify?.signals?.agency === true ? "agency" : null;
   db.prepare(`
     UPDATE jobs SET
       decision = @decision,
@@ -330,6 +336,7 @@ export function updateJobTriage(db, dumpId, jobId, triage) {
       evaluation_json = @evaluation_json,
       materials_json = @materials_json,
       stage3_error = @stage3_error,
+      poster_type = COALESCE(jobs.poster_type, @poster_type),
       track_status = CASE
         WHEN @decision IN ('apply', 'maybe') AND (track_status IS NULL OR track_status = '')
           THEN 'todo'
@@ -353,6 +360,7 @@ export function updateJobTriage(db, dumpId, jobId, triage) {
       : null,
     materials_json: triage.materials ? JSON.stringify(triage.materials) : null,
     stage3_error: triage.error ?? triage.stage3Error ?? null,
+    poster_type: agencyFromSignals,
     stamp,
   });
 }

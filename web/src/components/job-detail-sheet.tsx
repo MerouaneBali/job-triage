@@ -16,6 +16,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { JobRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { UserRound } from "lucide-react";
 
 function LinkedInIcon({ className }: { className?: string }) {
   return (
@@ -93,10 +94,21 @@ export function JobDetailSheet({
                         <DecisionBadge decision={job.decision ?? null} />
                       </div>
                     </div>
-                    <SheetDescription className="text-sm">
-                      {[job.company, job.location]
-                        .filter(Boolean)
-                        .join(" · ") || "No company / location"}
+                    <SheetDescription className="flex flex-wrap items-center gap-2 text-sm">
+                      <span>
+                        {[job.company, job.location]
+                          .filter(Boolean)
+                          .join(" · ") || "No company / location"}
+                      </span>
+                      {job.posterType === "agency" ? (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-400"
+                          title="Posted by a recruitment agency — the actual employer may not be named"
+                        >
+                          <UserRound className="size-2.5" />
+                          Agency
+                        </span>
+                      ) : null}
                     </SheetDescription>
                     <div className="flex flex-wrap items-center gap-2 sm:hidden">
                       <DecisionBadge decision={job.decision ?? null} />

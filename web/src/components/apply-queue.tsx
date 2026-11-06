@@ -32,6 +32,7 @@ import {
   FileText,
   Lightbulb,
   MessageSquare,
+  UserRound,
 } from "lucide-react";
 
 /* LinkedIn glyph — used by the commented LinkedIn CTA below; keep for restore.
@@ -313,8 +314,17 @@ export function ApplyQueue({
                     <h3 className="text-base font-semibold leading-snug">
                       {job.title || "Untitled"}
                     </h3>
-                    <p className="text-sm text-muted-foreground">
-                      {[job.company, job.location].filter(Boolean).join(" · ")}
+                    <p className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
+                      <span>{[job.company, job.location].filter(Boolean).join(" · ")}</span>
+                      {job.posterType === "agency" ? (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0 text-[10px] font-medium text-amber-700 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-400"
+                          title="Posted by a recruitment agency — the actual employer may not be named"
+                        >
+                          <UserRound className="size-2.5" />
+                          Agency
+                        </span>
+                      ) : null}
                     </p>
                     {job.dumpName ? (
                       <p className="truncate font-mono text-[10px] text-muted-foreground/80">

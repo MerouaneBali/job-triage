@@ -153,6 +153,68 @@ const SALARY_RE =
 const LOCATION_HINT =
   /\((?:Remote|Hybrid|On-?site)\)|United Kingdom|\b(?:London|Manchester|Birmingham|Edinburgh|Glasgow|Bristol|Leeds|Preston|Cambridge|Oxford|Reading|Remote)\b/i;
 
+/**
+ * Company names that are platform/meta names, not real employers.
+ * When we see these we try to extract the real company from the title.
+ */
+const COMPANY_BLOCKLIST = new Set([
+  "linkedin jobs",
+  "linkedin",
+]);
+
+/**
+ * Known staffing/recruitment agency name fragments (case-insensitive).
+ * Also catches generic agency suffix words.
+ */
+const AGENCY_NAME_RE =
+  /\b(?:recruitment|resourcing|staffing|talent|search|headhunt|hunter|hire|placements?|consult(?:ing|ancy)|solutions|partners?)\b/i;
+
+/** Specific well-known UK/global agency names (lowercase for matching). */
+const KNOWN_AGENCIES = new Set([
+  "noir", "oliver bernard", "opus recruitment solutions", "opus recruitment",
+  "owen thomas", "truenorth", "jobgether", "remotehunter", "talenhop",
+  "oakleigh resourcing", "stealth it consulting", "phoenix search",
+  "yld", "senzo group", "dex", "remoteunited", "jobgether",
+]);
+
+/** Return 'agency' | 'direct' | null based on company name alone. */
+function classifyPosterType(company) {
+  if (!company) return null;
+  const low = company.toLowerCase().trim();
+  if (KNOWN_AGENCIES.has(low)) return "agency";
+  if (AGENCY_NAME_RE.test(company)) return "agency";
+  return null; // unknown — will be refined from description in qualify
+}
+
+/**
+ * LinkedIn newer format encodes company + location inside the job title:
+ *   "Lead Developer at Thunk — United Kingdom"
+ *   "Head of Finance at Comfort Plus Products — Letchworth, England"
+ * Returns { cleanTitle, extractedCompany, extractedLocation } or null if no match.
+ */
+function splitLinkedInTitle(rawTitle) {
+  if (!rawTitle) return null;
+  // U+2014 em-dash or U+2013 en-dash
+  const m = rawTitle.match(/^(.+?)\s+at\s+(.+?)\s+[—–]\s+(.+)$/u);
+  if (m) {
+    return {
+      cleanTitle: m[1].trim(),
+      extractedCompany: m[2].trim(),
+      extractedLocation: m[3].trim(),
+    };
+  }
+  // No location separator — just "Title at Company"
+  const m2 = rawTitle.match(/^(.+?)\s+at\s+([A-Z][A-Za-z0-9 &.,+\-']{2,60})$/u);
+  if (m2) {
+    return {
+      cleanTitle: m2[1].trim(),
+      extractedCompany: m2[2].trim(),
+      extractedLocation: null,
+    };
+  }
+  return null;
+}
+
 function collectInputs(path) {
   if (!existsSync(path)) {
     console.error(`Path not found: ${path}`);
@@ -292,6 +354,22 @@ Tip: use bookmarklet.html on the Jobs results page after scrolling.`);
     const postedAt = postedAtDate ? postedAtDate.toISOString() : null;
     const posted = formatAgo(postedAtDate, parsedAt);
 
+    // If company is in the blocklist (e.g. "LinkedIn Jobs"), or still null,
+    // attempt to extract the real company + location from the title string.
+    if (!company || COMPANY_BLOCKLIST.has((company || "").toLowerCase().trim())) {
+      const split = splitLinkedInTitle(title);
+      if (split) {
+        title = split.cleanTitle;
+        company = split.extractedCompany;
+        if (!location && split.extractedLocation) location = split.extractedLocation;
+      } else if (COMPANY_BLOCKLIST.has((company || "").toLowerCase().trim())) {
+        // Couldn't extract — clear the bogus platform name
+        company = null;
+      }
+    }
+
+    const posterType = classifyPosterType(company);
+
     const easyApply = /Easy Apply/i.test(chunk);
     const earlyApplicant = /Be an early applicant/i.test(chunk);
     const verified =
@@ -320,6 +398,7 @@ Tip: use bookmarklet.html on the Jobs results page after scrolling.`);
       earlyApplicant,
       verified,
       logoUrl,
+      posterType,
       url: `https://www.linkedin.com/jobs/view/${id}`,
     };
   }

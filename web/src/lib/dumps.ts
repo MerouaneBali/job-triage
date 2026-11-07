@@ -3,7 +3,7 @@ import { basename, join } from "node:path";
 import { jobFingerprint } from "@/lib/job-fingerprint";
 import Database from "better-sqlite3";
 import { dataPaths } from "./paths";
-import type { DumpDetail, DumpSummary, HtmlDump, JobRow } from "./types";
+import type { Decision, DumpDetail, DumpSummary, HtmlDump, JobRow } from "./types";
 
 function ensureJobsTrackColumns(db: Database.Database) {
   const cols = new Set(
@@ -232,6 +232,7 @@ export function updateJobTrackFields(
   dumpName: string,
   jobId: string,
   patch: {
+    decision?: Decision | null;
     trackStatus?: JobRow["trackStatus"] | null;
     applyChannel?: JobRow["applyChannel"] | null;
     trackNote?: string | null;
@@ -288,8 +289,14 @@ export function updateJobTrackFields(
       trackedAt = stamp;
     }
 
+    const newDecision =
+      patch.decision !== undefined
+        ? patch.decision  // typed as Decision | null — already validated by TypeScript
+        : (row.decision as string | null);
+
     db.prepare(`
       UPDATE jobs SET
+        decision = @decision,
         track_status = @track_status,
         apply_channel = @apply_channel,
         track_note = @track_note,
@@ -299,6 +306,7 @@ export function updateJobTrackFields(
     `).run({
       dump_id: dump.id,
       job_id: String(jobId),
+      decision: newDecision ?? null,
       track_status: trackStatus ?? null,
       apply_channel: applyChannel ?? null,
       track_note: trackNote ?? null,

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { updateJobTrackFields } from "@/lib/dumps";
-import type { ApplyChannel, TrackStatus } from "@/lib/types";
+import type { ApplyChannel, Decision, TrackStatus } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,6 +15,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     }
     const body = (await req.json()) as {
       dumpName?: string;
+      decision?: Decision | null;
       trackStatus?: TrackStatus | null;
       applyChannel?: ApplyChannel | null;
       trackNote?: string | null;
@@ -23,6 +24,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
       return NextResponse.json({ error: "dumpName required" }, { status: 400 });
     }
     const job = updateJobTrackFields(body.dumpName, id, {
+      decision: body.decision,
       trackStatus: body.trackStatus,
       applyChannel: body.applyChannel,
       trackNote: body.trackNote,

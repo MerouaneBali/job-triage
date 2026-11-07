@@ -2,7 +2,6 @@
 
 import React from "react";
 import { CompanyLogo } from "@/components/company-logo";
-import { DecisionBadge } from "@/components/decision-badge";
 import { TagList } from "@/components/tag-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,10 +15,37 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { JobRow } from "@/lib/types";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { TRACK_STATUS_META } from "@/components/track-status-badge";
+import type { ApplyChannel, Decision, JobRow, TrackStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Loader2, Sparkles, Trash2, UserRound } from "lucide-react";
 import { toast } from "sonner";
+
+const DECISION_OPTIONS: { value: Decision | "none"; label: string; className: string }[] = [
+  { value: "apply",  label: "✅ Apply",  className: "text-emerald-700 bg-emerald-50 border-emerald-300 dark:text-emerald-400 dark:bg-emerald-950/30 dark:border-emerald-700" },
+  { value: "maybe",  label: "🤔 Maybe",  className: "text-amber-700 bg-amber-50 border-amber-300 dark:text-amber-400 dark:bg-amber-950/30 dark:border-amber-700" },
+  { value: "skip",   label: "⏭ Skip",   className: "text-zinc-500 bg-zinc-100 border-zinc-300 dark:text-zinc-400 dark:bg-zinc-800 dark:border-zinc-600" },
+  { value: "none",   label: "— No decision", className: "text-muted-foreground bg-background border-border" },
+];
+
+const STATUS_OPTIONS = (Object.keys(TRACK_STATUS_META) as TrackStatus[]).map((value) => ({
+  value,
+  label: TRACK_STATUS_META[value].label,
+  icon: TRACK_STATUS_META[value].icon,
+}));
+
+const CHANNEL_OPTIONS: { value: ApplyChannel; label: string }[] = [
+  { value: "easy_apply", label: "Easy Apply" },
+  { value: "external",   label: "External site" },
+  { value: "message",    label: "Message / DM" },
+];
 
 function LinkedInIcon({ className }: { className?: string }) {
   return (
@@ -77,10 +103,11 @@ export function JobDetailSheet({
   onRequestRefresh?: (jobId: string | number) => void;
 }) {
   const [localMaterials, setLocalMaterials] = React.useState<JobRow["materials"]>(null);
-  const [generating, setGenerating] = React.useState<string | null>(null); // which item is generating
+  const [generating, setGenerating] = React.useState<string | null>(null);
   const [deleting, setDeleting] = React.useState(false);
   const [evaluating, setEvaluating] = React.useState(false);
   const [pendingRefresh, setPendingRefresh] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
 
   // Sync local materials when job changes
   React.useEffect(() => {
@@ -90,6 +117,29 @@ export function JobDetailSheet({
   const evaln = job?.evaluation;
   const materials = localMaterials ?? job?.materials;
   const elig = evaln?.eligibility?.status;
+
+  async function patchJob(patch: {
+    decision?: Decision | null;
+    trackStatus?: TrackStatus | null;
+    applyChannel?: ApplyChannel | null;
+  }) {
+    if (!job?.id || !job.dumpName || saving) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/jobs/${encodeURIComponent(String(job.id))}/track`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dumpName: job.dumpName, ...patch }),
+      });
+      const data = (await res.json()) as { job?: JobRow; error?: string };
+      if (!res.ok || !data.job) throw new Error(data.error ?? "Update failed");
+      onJobUpdated?.(data.job);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Update failed");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function handleDelete() {
     if (!job?.id || !job.dumpName || deleting) return;
@@ -200,14 +250,9 @@ export function JobDetailSheet({
                     className="size-10 shrink-0"
                   />
                   <div className="min-w-0 flex-1 space-y-1.5 sm:space-y-1">
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                      <SheetTitle className="text-base leading-snug sm:text-lg">
-                        {job.title || "Untitled role"}
-                      </SheetTitle>
-                      <div className="hidden shrink-0 sm:block">
-                        <DecisionBadge decision={job.decision ?? null} />
-                      </div>
-                    </div>
+                    <SheetTitle className="text-base leading-snug sm:text-lg">
+                      {job.title || "Untitled role"}
+                    </SheetTitle>
                     <SheetDescription className="flex flex-wrap items-center gap-2 text-sm">
                       <span>
                         {[job.company, job.location]
@@ -224,8 +269,98 @@ export function JobDetailSheet({
                         </span>
                       ) : null}
                     </SheetDescription>
-                    <div className="flex flex-wrap items-center gap-2 sm:hidden">
-                      <DecisionBadge decision={job.decision ?? null} />
+                    {/* Decision + status pickers — always visible */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* Decision */}
+                      <Select
+                        value={job.decision ?? "none"}
+                        disabled={saving || !job.dumpName}
+                        onValueChange={(v) =>
+                          void patchJob({ decision: v === "none" ? null : (v as Decision) })
+                        }
+                      >
+                        <SelectTrigger className={cn(
+                          "h-6 w-auto shrink-0 rounded-full border px-2.5 text-[11px] font-medium focus:ring-0",
+                          DECISION_OPTIONS.find((o) => o.value === (job.decision ?? "none"))?.className,
+                        )}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {DECISION_OPTIONS.map((opt) => (
+                            <SelectItem key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {/* Track status */}
+                      {job.dumpName ? (
+                        <Select
+                          value={job.trackStatus ?? "todo"}
+                          disabled={saving}
+                          onValueChange={(v) => {
+                            const next = v as TrackStatus;
+                            void patchJob({
+                              trackStatus: next,
+                              applyChannel:
+                                next === "applied" && !job.applyChannel
+                                  ? job.easyApply ? "easy_apply" : "external"
+                                  : job.applyChannel,
+                            });
+                          }}
+                        >
+                          <SelectTrigger className={cn(
+                            "h-6 w-auto shrink-0 rounded-full border px-2.5 text-[11px] font-medium focus:ring-0",
+                            TRACK_STATUS_META[job.trackStatus ?? "todo"].className,
+                          )}>
+                            <SelectValue>
+                              {(value) => {
+                                const s = (value as TrackStatus) ?? "todo";
+                                const meta = TRACK_STATUS_META[s];
+                                const Icon = meta?.icon;
+                                return Icon ? (
+                                  <span className="inline-flex items-center gap-1">
+                                    <Icon className="size-3 shrink-0" aria-hidden />
+                                    {meta.label}
+                                  </span>
+                                ) : null;
+                              }}
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {STATUS_OPTIONS.map((opt) => {
+                              const Icon = opt.icon;
+                              return (
+                                <SelectItem key={opt.value} value={opt.value}>
+                                  <span className="inline-flex items-center gap-2">
+                                    <Icon className="size-3.5 shrink-0" aria-hidden />
+                                    {opt.label}
+                                  </span>
+                                </SelectItem>
+                              );
+                            })}
+                          </SelectContent>
+                        </Select>
+                      ) : null}
+                      {/* Apply channel — when applied/waiting */}
+                      {job.dumpName && (job.trackStatus === "applied" || job.trackStatus === "waiting" || job.applyChannel) ? (
+                        <Select
+                          value={job.applyChannel ?? ""}
+                          disabled={saving}
+                          onValueChange={(v) => void patchJob({ applyChannel: v as ApplyChannel })}
+                        >
+                          <SelectTrigger className="h-6 w-auto shrink-0 rounded-full border px-2.5 text-[11px] font-medium focus:ring-0">
+                            <SelectValue placeholder="Channel…" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {CHANNEL_OPTIONS.map((opt) => (
+                              <SelectItem key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : null}
                       {job.fitScore != null ? (
                         <Badge variant="secondary">Score {job.fitScore}</Badge>
                       ) : null}
@@ -233,12 +368,7 @@ export function JobDetailSheet({
                   </div>
                 </div>
               </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-                {job.fitScore != null ? (
-                  <Badge variant="secondary" className="max-sm:hidden">
-                    Score {job.fitScore}
-                  </Badge>
-                ) : null}
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                 {job.confidence != null ? (
                   <Badge variant="secondary">
                     Conf {(job.confidence * 100).toFixed(0)}%

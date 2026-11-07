@@ -334,6 +334,8 @@ export function updateJobDetail(db, dumpId, jobId, detail) {
       detail_fetched_at = @detail_fetched_at,
       title = COALESCE(@title, title),
       company = COALESCE(@company, company),
+      location = COALESCE(@location, location),
+      logo_url = COALESCE(@logo_url, logo_url),
       apply_url = COALESCE(@apply_url, apply_url)
     WHERE dump_id = @dump_id AND job_id = @job_id
   `).run({
@@ -346,6 +348,8 @@ export function updateJobDetail(db, dumpId, jobId, detail) {
     detail_fetched_at: detail.fetchedAt ?? null,
     title: detail.title ?? null,
     company: detail.company ?? null,
+    location: detail.location ?? null,
+    logo_url: detail.logoUrl ?? null,
     apply_url: detail.applyUrl ?? null,
   });
 }

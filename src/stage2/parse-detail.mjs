@@ -173,17 +173,127 @@ function fromAboutTheJob(html) {
 
 function fromTitleTag(html) {
   const m = html.match(/<title>([^<]+)<\/title>/i);
-  if (!m) return { title: null, company: null };
-  const raw = cleanText(m[1]);
-  // "Title | Company | LinkedIn"
-  const parts = raw.split("|").map((p) => p.trim());
-  if (parts.length >= 2 && !/^linkedin$/i.test(parts[0])) {
+  if (!m) return { title: null, company: null, location: null };
+  // Strip leading notification count like "(1) Job Title | …"
+  let raw = cleanText(m[1]).replace(/^\(\d+\)\s*/, "");
+  const isLinkedInPart = (s) => /^linkedin(\s+jobs)?$/i.test(s.trim());
+
+  // Pattern A: "Title at Company — Location | LinkedIn Jobs"
+  //   e.g. "Full Stack Engineer at Entefy — United States | LinkedIn Jobs"
+  const atPattern = raw.match(
+    /^(.+?)\s+at\s+(.+?)\s+[—–-]\s+(.+?)\s*\|\s*LinkedIn/i
+  );
+  if (atPattern) {
     return {
-      title: parts[0] || null,
-      company: parts[1] && !/^linkedin$/i.test(parts[1]) ? parts[1] : null,
+      title: atPattern[1].trim() || null,
+      company: atPattern[2].trim() || null,
+      location: atPattern[3].trim() || null,
     };
   }
-  return { title: raw.replace(/\s*\|\s*LinkedIn$/i, "") || null, company: null };
+
+  // Pattern B: "Title | Company | LinkedIn" or "Title | LinkedIn Jobs"
+  const parts = raw.split("|").map((p) => p.trim());
+  if (parts.length >= 2 && !isLinkedInPart(parts[0])) {
+    return {
+      title: parts[0] || null,
+      company: parts[1] && !isLinkedInPart(parts[1]) ? parts[1] : null,
+      location: null,
+    };
+  }
+
+  return {
+    title: raw.replace(/\s*\|\s*LinkedIn(\s+Jobs)?$/i, "").trim() || null,
+    company: null,
+    location: null,
+  };
+}
+
+/** Extract company logo URL from LinkedIn detail page HTML. */
+function extractLogoUrl(html) {
+  // 1. Any <img src="…media.licdn.com/dms/image/…company-logo…">
+  //    This is the most reliable pattern seen in real LinkedIn detail pages.
+  //    The URL contains "company-logo" in the path, distinguishing it from
+  //    profile photos, icons, etc.
+  const companyLogoSrc = html.match(
+    /src="(https?:\/\/media\.licdn\.com\/dms\/image\/[^"]*company-logo[^"]*)"/i
+  );
+  if (companyLogoSrc?.[1]) return decodeHref(companyLogoSrc[1]);
+
+  // 2. artdeco-entity-image with any media.licdn.com src (fallback)
+  const artdeco = html.match(
+    /class="[^"]*artdeco-entity-image[^"]*"[^>]*src="(https?:\/\/media\.licdn\.com\/[^"]+)"/i
+  ) || html.match(
+    /src="(https?:\/\/media\.licdn\.com\/[^"]+)"[^>]*class="[^"]*artdeco-entity-image[^"]*"/i
+  );
+  if (artdeco?.[1] && !artdeco[1].includes("ghost") && !artdeco[1].includes("aero-v1")) {
+    return decodeHref(artdeco[1]);
+  }
+
+  // 3. JSON: "logoUrls":["https://..."]
+  const logoUrls = html.match(/"logoUrls"\s*:\s*\["(https?:\/\/[^"]+)"/i);
+  if (logoUrls?.[1]) return logoUrls[1];
+
+  return null;
+}
+
+/** Extract job location from LinkedIn detail page HTML. */
+function extractLocation(html) {
+  // 1. JSON-LD: jobLocation
+  const blocks = [...html.matchAll(
+    /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
+  )];
+  for (const m of blocks) {
+    try {
+      const data = JSON.parse(m[1].trim());
+      const nodes = Array.isArray(data) ? data : [data];
+      for (const node of nodes) {
+        const graph = node["@graph"] || [node];
+        for (const g of graph) {
+          const type = g["@type"];
+          const isJob = type === "JobPosting" || (Array.isArray(type) && type.includes("JobPosting"));
+          if (!isJob) continue;
+          const loc = g.jobLocation;
+          if (!loc) continue;
+          if (typeof loc === "string" && loc.length > 2) return loc;
+          const addr = loc.address || (Array.isArray(loc) && loc[0]?.address);
+          if (!addr) continue;
+          const parts = [addr.addressLocality, addr.addressRegion, addr.addressCountry]
+            .filter(Boolean);
+          if (parts.length) return parts.join(", ");
+        }
+      }
+    } catch {}
+  }
+
+  // 2. HTML patterns — bullet spans use multi-line capture (content is on separate lines)
+  const bulletClasses = [
+    "topcard__flavor--bullet",
+    "top-card-layout__bullet",
+    "jobs-unified-top-card__bullet",
+    "job-details-jobs-unified-top-card__primary-description",
+  ];
+  for (const cls of bulletClasses) {
+    const re = new RegExp(
+      `class="[^"]*${cls}[^"]*"[^>]*>[\\s\\S]{0,10}?([\\w][^<]{2,100}?)\\s*<`,
+      "i"
+    );
+    const m = html.match(re);
+    if (m?.[1]) {
+      const loc = cleanText(m[1]).trim();
+      if (
+        loc.length > 2 &&
+        !/^(linkedin|see more|full-time|part-time|contract|hybrid|on-?site|remote|\d+ applicant)/i.test(loc)
+      ) {
+        return loc;
+      }
+    }
+  }
+
+  // 3. JSON: "formattedLocation":"..."
+  const fmtLoc = html.match(/"formattedLocation"\s*:\s*"([^"]{3,120})"/i);
+  if (fmtLoc?.[1]) return fmtLoc[1];
+
+  return null;
 }
 
 function decodeHref(s) {
@@ -233,7 +343,7 @@ export function extractApplyUrl(html) {
 
 /**
  * @param {string} html
- * @returns {{ title: string|null, company: string|null, description: string|null, applyUrl: string|null, challenged: boolean }}
+ * @returns {{ title: string|null, company: string|null, location: string|null, logoUrl: string|null, description: string|null, applyUrl: string|null, challenged: boolean }}
  */
 export function parseDetailHtml(html) {
   const challenged = looksLikeChallenge(html);
@@ -249,12 +359,37 @@ export function parseDetailHtml(html) {
   if (isBogusDescription(description)) description = null;
 
   let title = (fromLd && fromLd.title) || titleBits.title;
-  let company = (fromLd && fromLd.company) || titleBits.company;
   if (title && /log\s*in or sign up/i.test(title)) title = null;
+
+  // Company: JSON-LD > title-tag > HTML sub-nav anchor > logo alt text
+  let company = (fromLd && fromLd.company) || titleBits.company;
+  if (!company) {
+    // sub-nav-cta__optional-url title attr (most reliable for guest pages)
+    const subNav =
+      html.match(/class="[^"]*sub-nav-cta__optional-url[^"]*"[^>]*title="([^"]{2,80})"/i) ||
+      html.match(/title="([^"]{2,80})"[^>]*class="[^"]*sub-nav-cta__optional-url[^"]*"/i);
+    if (subNav?.[1]) company = subNav[1];
+  }
+  if (!company) {
+    // company logo alt attribute on artdeco-entity-image (second-best)
+    const logoAlt = html.match(
+      /class="[^"]*artdeco-entity-image[^"]*"[^>]*alt="([^"]{2,80})"/i
+    ) || html.match(
+      /alt="([^"]{2,80})"[^>]*class="[^"]*artdeco-entity-image[^"]*"/i
+    );
+    if (logoAlt?.[1]) company = logoAlt[1];
+  }
+  // Reject any LinkedIn brand name that leaked through
+  if (company && /^linkedin(\s+jobs)?$/i.test(company.trim())) company = null;
+
+  // Location: try HTML extraction first, fall back to title-tag location
+  const location = extractLocation(html) || titleBits.location || null;
 
   return {
     title,
     company,
+    location,
+    logoUrl: extractLogoUrl(html),
     description,
     applyUrl: extractApplyUrl(html),
     // Only flag challenge when we lack a usable description

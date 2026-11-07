@@ -129,7 +129,8 @@ export type PipelineKind =
   | "stage3"
   | "parse-batch"
   | "fetch-batch"
-  | "stage3-batch";
+  | "stage3-batch"
+  | "quick-add";
 
 export type PipelineStopMode = "safe" | "force";
 

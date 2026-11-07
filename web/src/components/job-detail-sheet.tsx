@@ -18,7 +18,8 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { JobRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { Loader2, Sparkles, UserRound } from "lucide-react";
+import { Loader2, Sparkles, Trash2, UserRound } from "lucide-react";
+import { toast } from "sonner";
 
 function LinkedInIcon({ className }: { className?: string }) {
   return (
@@ -61,14 +62,25 @@ export function JobDetailSheet({
   open,
   onOpenChange,
   onJobUpdated,
+  onJobDeleted,
+  onPipelineJobStarted,
+  onRequestRefresh,
 }: {
   job: JobRow | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onJobUpdated?: (patch: Partial<JobRow>) => void;
+  onJobDeleted?: (jobId: string) => void;
+  /** Called immediately when an evaluate pipeline job is started, with its server-side job ID. */
+  onPipelineJobStarted?: (pipelineJobId: string) => void;
+  /** Called when evaluation finishes and the job data should be refreshed from the server. */
+  onRequestRefresh?: (jobId: string | number) => void;
 }) {
   const [localMaterials, setLocalMaterials] = React.useState<JobRow["materials"]>(null);
   const [generating, setGenerating] = React.useState<string | null>(null); // which item is generating
+  const [deleting, setDeleting] = React.useState(false);
+  const [evaluating, setEvaluating] = React.useState(false);
+  const [pendingRefresh, setPendingRefresh] = React.useState(false);
 
   // Sync local materials when job changes
   React.useEffect(() => {
@@ -78,6 +90,76 @@ export function JobDetailSheet({
   const evaln = job?.evaluation;
   const materials = localMaterials ?? job?.materials;
   const elig = evaln?.eligibility?.status;
+
+  async function handleDelete() {
+    if (!job?.id || !job.dumpName || deleting) return;
+    if (!confirm(`Delete "${job.title ?? "this job"}" from the ${job.dumpName} dump? This cannot be undone.`)) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(
+        `/api/jobs/${encodeURIComponent(job.id)}?dumpName=${encodeURIComponent(job.dumpName)}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) {
+        const data = (await res.json()) as { error?: string };
+        throw new Error(data.error ?? `HTTP ${res.status}`);
+      }
+      toast.success("Job deleted");
+      onOpenChange(false);
+      onJobDeleted?.(String(job.id));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Delete failed");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function handleEvaluate() {
+    if (!job?.id || !job.dumpName || evaluating) return;
+    setEvaluating(true);
+    const jobId = job.id;
+    const dumpName = job.dumpName;
+    try {
+      const res = await fetch(`/api/jobs/${encodeURIComponent(String(jobId))}/evaluate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dumpName, force: true }),
+      });
+      const data = (await res.json()) as { ok?: boolean; pipelineJobId?: string; error?: string };
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      toast.success("AI evaluation started — the terminal will pop up automatically in a moment.", { duration: 6000 });
+      setPendingRefresh(true);
+      // Notify parent immediately so it can open the terminal overlay
+      if (data.pipelineJobId) onPipelineJobStarted?.(data.pipelineJobId);
+      // Poll for pipeline completion, then notify parent to reload job data
+      const pipelineId = data.pipelineJobId;
+      if (pipelineId) {
+        void (async () => {
+          // Poll /api/pipeline/active until our job is no longer the active one
+          for (let attempts = 0; attempts < 120; attempts++) {
+            await new Promise((r) => setTimeout(r, 3000));
+            try {
+              const sr = await fetch("/api/pipeline/active");
+              if (!sr.ok) break;
+              const sdata = (await sr.json()) as { job?: { id: string; status: string } | null };
+              // Job finished when it's no longer the active running job
+              if (!sdata.job || sdata.job.id !== pipelineId || sdata.job.status !== "running") break;
+            } catch {
+              break;
+            }
+          }
+          setPendingRefresh(false);
+          onRequestRefresh?.(jobId);
+          toast.success("Evaluation complete — job data refreshed.", { duration: 5000 });
+        })();
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Evaluate failed");
+      setPendingRefresh(false);
+    } finally {
+      setEvaluating(false);
+    }
+  }
 
   async function generate(what: string[]) {
     if (!job?.id || generating) return;
@@ -183,6 +265,38 @@ export function JobDetailSheet({
                     <LinkedInIcon className="size-3.5 shrink-0" />
                     Open on LinkedIn
                   </a>
+                ) : null}
+                {job.dumpName ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleEvaluate()}
+                    disabled={evaluating || pendingRefresh || !!generating}
+                    title={job.evaluation ? "Re-run AI evaluation for this job" : "Run AI evaluation for this job"}
+                    className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-violet-300 bg-violet-50 px-2.5 text-xs font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50 dark:border-violet-700 dark:bg-violet-950/30 dark:text-violet-400 dark:hover:bg-violet-950/60"
+                  >
+                    {evaluating || pendingRefresh ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="size-3.5" />
+                    )}
+                    {evaluating ? "Starting…" : pendingRefresh ? "Evaluating…" : job.evaluation ? "Re-evaluate" : "Evaluate with AI"}
+                  </button>
+                ) : null}
+                {job.dumpName ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleDelete()}
+                    disabled={deleting}
+                    title="Delete this job"
+                    className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-rose-200 px-2.5 text-xs font-medium text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-800 dark:text-rose-400 dark:hover:bg-rose-950/40"
+                  >
+                    {deleting ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="size-3.5" />
+                    )}
+                    Delete
+                  </button>
                 ) : null}
               </div>
             </SheetHeader>

@@ -70,6 +70,17 @@ const maxDescIdx = args.indexOf("--max-desc-chars");
 const MAX_DESC_CHARS = maxDescIdx >= 0 ? Number(args[maxDescIdx + 1]) : 8_000;
 const maxAgeIdx = args.indexOf("--max-age-days");
 const MAX_AGE_DAYS = maxAgeIdx >= 0 ? Number(args[maxAgeIdx + 1]) : 30;
+// --job-ids ID1,ID2,… — restrict evaluation to only these job IDs
+const jobIdsIdx = args.indexOf("--job-ids");
+const jobIdsFilter =
+  jobIdsIdx >= 0
+    ? new Set(
+        (args[jobIdsIdx + 1] ?? "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      )
+    : null;
 
 /** Flatten drainUsage() result into logUsage() param names. */
 function flattenUsage(u) {
@@ -187,6 +198,28 @@ if (qualifyOnly) {
 
 let toEval = qualified.filter((j) => j.qualify.eligibility === "pass");
 
+// Restrict to specific job IDs when --job-ids is supplied.
+// Jobs explicitly listed via --job-ids bypass the qualify filter — the user
+// manually selected them, so we evaluate regardless of eligibility signals.
+if (jobIdsFilter && jobIdsFilter.size > 0) {
+  // Include any --job-ids jobs that failed qualify (bypass the filter for them)
+  const forcedBypassIds = new Set();
+  for (const j of qualified) {
+    if (jobIdsFilter.has(String(j.id)) && j.qualify.eligibility !== "pass") {
+      toEval.push(j); // add back despite qualify fail
+      forcedBypassIds.add(String(j.id));
+    }
+  }
+  if (forcedBypassIds.size) {
+    console.log(
+      `--job-ids: bypassed qualify filter for ${forcedBypassIds.size} job(s): ${[...forcedBypassIds].join(", ")}`
+    );
+  }
+  const before = toEval.length;
+  toEval = toEval.filter((j) => jobIdsFilter.has(String(j.id)));
+  console.log(`--job-ids filter: ${toEval.length}/${before} jobs match`);
+}
+
 // Skip jobs older than MAX_AGE_DAYS (likely already filled)
 if (Number.isFinite(MAX_AGE_DAYS) && MAX_AGE_DAYS > 0) {
   const cutoff = new Date(Date.now() - MAX_AGE_DAYS * 86_400_000);
@@ -296,7 +329,7 @@ try {
       // Log qualify usage
       const qualifyUsage = claude.drainUsage();
       if (qualifyUsage.input_tokens > 0) {
-        logUsage(db, { model: claude.model, dumpName, jobId: job.id, stage: "qualify", ...flattenUsage(qualifyUsage) });
+        logUsage(db, { model: claude.model, dumpName: basename, jobId: job.id, stage: "qualify", ...flattenUsage(qualifyUsage) });
       }
 
       // Reset consecutive error counter on successful API call
@@ -325,7 +358,7 @@ try {
         // Log generate usage
         const genUsage = claude.drainUsage();
         if (genUsage.input_tokens > 0) {
-          logUsage(db, { model: claude.model, dumpName, jobId: job.id, stage: "generate", ...flattenUsage(genUsage) });
+          logUsage(db, { model: claude.model, dumpName: basename, jobId: job.id, stage: "generate", ...flattenUsage(genUsage) });
         }
         consecutiveApiErrors = 0;
       } else if (decision === "maybe" && !generateMaybe && !skipGenerate) {

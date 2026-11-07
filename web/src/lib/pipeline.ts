@@ -494,6 +494,41 @@ export function startParseUpload(savedHtmlName: string): PipelineJob {
   return startParse(savedHtmlName);
 }
 
+function extractLinkedInJobId(url: string): string | null {
+  try {
+    const u = new URL(url);
+    const m = u.pathname.match(/\/jobs\/view\/(\d+)/);
+    if (m) return m[1];
+    const cjid = u.searchParams.get("currentJobId");
+    if (cjid && /^\d+$/.test(cjid)) return cjid;
+  } catch {}
+  const m = url.match(/\/jobs\/view\/(\d+)/);
+  if (m) return m[1];
+  const m2 = url.match(/currentJobId=(\d+)/);
+  if (m2) return m2[1];
+  return null;
+}
+
+/** Fetch a single LinkedIn job page and save it to the "manual" dump. */
+export function startQuickAdd(
+  url: string,
+  opts: { headless?: boolean; stage3?: boolean } = {}
+): PipelineJob {
+  if (!extractLinkedInJobId(url)) {
+    throw Object.assign(
+      new Error(
+        "Could not extract a LinkedIn job ID from the URL. Supported formats:\n" +
+          "  https://www.linkedin.com/jobs/view/1234567890/\n" +
+          "  https://www.linkedin.com/jobs/collections/recommended/?currentJobId=1234567890"
+      ),
+      { status: 400 }
+    );
+  }
+  const fetchArgs = [join("src", "quick-add.mjs"), url, "--no-pause"];
+  if (opts.headless) fetchArgs.push("--headless");
+  return startChild("quick-add", fetchArgs, "quick-add");
+}
+
 type Stage3Opts = {
   limit?: number;
   force?: boolean;
@@ -524,6 +559,36 @@ function buildStage3Args(stem: string, opts: Stage3Opts): string[] {
     args.push("--max-age-days", String(opts.maxAgeDays));
   }
   return args;
+}
+
+/**
+ * Run Stage 3 targeting a single job in a named dump.
+ * Bypasses qualify filter and age filter so manually-triggered evaluations always run.
+ */
+export function startEvaluateJob(
+  dumpName: string,
+  jobId: string,
+  opts: {
+    coverLetter?: boolean;
+    outreach?: boolean;
+    strategy?: boolean;
+    force?: boolean;
+  } = {}
+): PipelineJob {
+  const stem = dumpName.replace(/\.json$/i, "");
+  if (!stem) throw Object.assign(new Error("Invalid dump name"), { status: 400 });
+  if (!jobId) throw Object.assign(new Error("jobId required"), { status: 400 });
+
+  const args = buildStage3Args(stem, {
+    force: opts.force !== false, // force by default for manual evaluation
+    maxAgeDays: 3650,            // bypass age filter
+    generateCoverLetter: opts.coverLetter,
+    generateOutreach: opts.outreach,
+    generateStrategy: opts.strategy,
+  });
+  args.push("--job-ids", jobId);
+
+  return startChild("stage3", args, `evaluate ${jobId}`);
 }
 
 export function startStage3(dumpName: string, opts: Stage3Opts = {}): PipelineJob {

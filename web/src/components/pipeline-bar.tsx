@@ -54,6 +54,12 @@ type Props = {
   onDumpReady?: (basename: string) => void;
   /** When false, only the floating log stays visible (tab switch). */
   showStages?: boolean;
+  /**
+   * When set, PipelineBar will immediately attach to this pipeline job ID
+   * and open the terminal overlay. Used by externally-triggered jobs (e.g.
+   * "Evaluate with AI") so the terminal appears without any polling.
+   */
+  autoAttachJobId?: string | null;
 };
 
 type StageKey = "1" | "2" | "3";
@@ -255,6 +261,7 @@ export function PipelineBar({
   onJobFinished,
   onDumpReady,
   showStages = true,
+  autoAttachJobId,
 }: Props) {
   const [htmlDumps, setHtmlDumps] = useState<HtmlDump[]>([]);
   const [htmlName, setHtmlName] = useState<string>("");
@@ -336,6 +343,32 @@ export function PipelineBar({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only reconnect
   }, []);
+
+  // When an external caller (e.g. "Evaluate with AI" button) starts a pipeline
+  // job, it passes the job ID here. Attach immediately — no polling needed.
+  useEffect(() => {
+    if (!autoAttachJobId || esRef.current) return;
+    // Fetch the job metadata first so we can populate `job` state correctly.
+    void (async () => {
+      try {
+        const res = await fetch("/api/pipeline/active");
+        if (!res.ok) return;
+        const data = (await res.json()) as { job: PipelineJob | null };
+        const pj = data.job;
+        if (!pj || pj.status !== "running") return;
+        // Only attach if the active job matches what was requested
+        if (pj.id !== autoAttachJobId) return;
+        if (esRef.current) return; // race guard
+        setJob(pj);
+        setBusy(true);
+        setLogOpen(true);
+        attachStream(pj.id);
+      } catch {
+        // ignore
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: fire when ID changes
+  }, [autoAttachJobId]);
 
   useEffect(() => {
     const el = logScrollRef.current;

@@ -145,6 +145,8 @@ function saveDetail(db, dumpId, record) {
     fetchedAt: record.fetchedAt,
     title: record.title,
     company: record.company,
+    location: record.location ?? null,
+    logoUrl: record.logoUrl ?? null,
     applyUrl: record.applyUrl ?? null,
   });
 }
@@ -194,6 +196,8 @@ if (reparseOnly) {
         fetchedAt: nowIso(),
         title: parsed.title || job.title,
         company: job.company || parsed.company,
+        location: parsed.location ?? null,
+        logoUrl: parsed.logoUrl ?? null,
         applyUrl: parsed.applyUrl,
       });
       ok += 1;
@@ -374,6 +378,8 @@ try {
     let description = null;
     let title = job.title || null;
     let company = job.company || null;
+    let location = null;
+    let logoUrl = null;
     let applyUrl = null;
     const absHtml = join(detailsHtmlDir, `${job.id}.html`);
     const rel = relativeDetailPath(job.id);
@@ -424,6 +430,8 @@ try {
 
       writeFileSync(absHtml, html, "utf8");
       applyUrl = parsed.applyUrl;
+      location = parsed.location ?? null;
+      logoUrl = parsed.logoUrl ?? null;
 
       if (parsed.description) {
         description = parsed.description;
@@ -473,6 +481,8 @@ try {
       fetchedAt: nowIso(),
       title,
       company,
+      location,
+      logoUrl,
       applyUrl,
     });
     upsertDump(db, { basename, fetched_at: nowIso() });

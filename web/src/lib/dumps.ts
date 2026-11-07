@@ -206,6 +206,25 @@ function rowToJob(row: Record<string, unknown>): JobRow {
   };
 }
 
+/** Delete a single job from a named dump. Returns true if a row was deleted. */
+export function deleteJob(dumpName: string, jobId: string): boolean {
+  const stem = safeBasename(dumpName);
+  if (!stem) throw Object.assign(new Error("Invalid dump name"), { status: 400 });
+  const db = openAppDb();
+  try {
+    const dump = db
+      .prepare("SELECT id FROM dumps WHERE basename = ?")
+      .get(stem) as { id: number } | undefined;
+    if (!dump) throw Object.assign(new Error("Dump not found"), { status: 404 });
+    const result = db
+      .prepare("DELETE FROM jobs WHERE dump_id = ? AND job_id = ?")
+      .run(dump.id, jobId);
+    return result.changes > 0;
+  } finally {
+    db.close();
+  }
+}
+
 const TRACK_STATUSES = new Set(["todo", "applied", "waiting", "closed"]);
 const APPLY_CHANNELS = new Set(["easy_apply", "external", "message"]);
 

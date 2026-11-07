@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApplyQueue } from "@/components/apply-queue";
 import { CompanyLogo } from "@/components/company-logo";
 import { DecisionBadge } from "@/components/decision-badge";
+import { QuickAddDialog } from "@/components/quick-add-dialog";
 import { JobDetailSheet } from "@/components/job-detail-sheet";
 import { PipelineBar } from "@/components/pipeline-bar";
 import { TrackStatusBadge } from "@/components/track-status-badge";
@@ -86,6 +87,9 @@ export function TriageApp() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [view, setView] = useState<AppView>("apply");
+
+  /** Pipeline job ID of an externally-started job (e.g. "Evaluate with AI") to auto-attach in PipelineBar. */
+  const [autoAttachJobId, setAutoAttachJobId] = useState<string | null>(null);
 
   const [search, setSearch] = useState("");
   const [decisionFilter, setDecisionFilter] = useState<string>("all");
@@ -447,6 +451,7 @@ export function TriageApp() {
             >
               <RefreshCw className={cn(bootLoading && "animate-spin")} />
             </Button>
+            <QuickAddDialog onStarted={() => void refreshAll()} />
           </div>
         ) : null}
       </header>
@@ -490,7 +495,11 @@ export function TriageApp() {
         dumpName={isAllMode ? dumps[0]?.name ?? null : dumpName}
         onDumpChange={setDumpName}
         showStages={view === "pipeline"}
-        onJobFinished={() => void refreshAll()}
+        autoAttachJobId={autoAttachJobId}
+        onJobFinished={() => {
+          setAutoAttachJobId(null);
+          void refreshAll();
+        }}
         onDumpReady={(name) => {
           // Only switch dump when the user is on the pipeline view —
           // avoid overwriting the Apply inbox or Browse-all selection.
@@ -944,6 +953,18 @@ export function TriageApp() {
               ),
             };
           });
+        }}
+        onJobDeleted={(jobId) => {
+          setSelectedId(null);
+          setDetail((prev) => {
+            if (!prev) return prev;
+            return { ...prev, jobs: prev.jobs.filter((j) => String(j.id) !== jobId) };
+          });
+        }}
+        onPipelineJobStarted={(id) => setAutoAttachJobId(id)}
+        onRequestRefresh={() => {
+          // Reload the dump so the newly-evaluated job appears with fresh data
+          void refreshAll();
         }}
       />
 

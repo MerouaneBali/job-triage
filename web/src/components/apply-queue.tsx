@@ -251,7 +251,7 @@ export function ApplyQueue({
       </div>
 
       {/* Status filter pills */}
-      <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+      <div className="flex gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {TRACK_FILTERS.map(({ key, label, icon: Icon }) => {
           const active = filter === key;
           const count = counts[key];

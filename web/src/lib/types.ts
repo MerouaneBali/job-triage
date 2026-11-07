@@ -82,6 +82,8 @@ export type JobRow = {
 };
 
 export const ALL_DUMPS = "__all__";
+/** All jobs across dumps (no decision filter — includes unevaluated). */
+export const ALL_DUMPS_ALL = "__all_browse__";
 
 export type DumpSummary = {
   name: string;

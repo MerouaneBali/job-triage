@@ -29,17 +29,46 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   DumpHealthMark,
   dumpFetchHint,
 } from "@/components/dump-health";
-import { ALL_DUMPS, type DumpDetail, type DumpSummary, type JobRow } from "@/lib/types";
+import { ALL_DUMPS, ALL_DUMPS_ALL, type DumpDetail, type DumpSummary, type JobRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { Briefcase, LayoutDashboard, ListFilter, RefreshCw, UserRound, Workflow } from "lucide-react";
+import { Briefcase, Check, Columns3, LayoutDashboard, ListFilter, RefreshCw, SlidersHorizontal, UserRound, Workflow } from "lucide-react";
 import { toast } from "sonner";
 import { Dashboard } from "@/components/dashboard";
 
 type SortKey = "fitScore" | "postedAt" | "company" | "title" | "decision";
 type AppView = "apply" | "triage" | "pipeline" | "dashboard";
+
+const ALL_COLS = ["status", "score", "conf", "eligibility", "posted", "ea", "location"] as const;
+type ColKey = (typeof ALL_COLS)[number];
+const COL_LABELS: Record<ColKey, string> = {
+  status: "Status",
+  score: "Score",
+  conf: "Conf",
+  eligibility: "Eligibility",
+  posted: "Posted",
+  ea: "EA",
+  location: "Location",
+};
+
+function readSavedCols(): Set<ColKey> {
+  if (typeof window === "undefined") return new Set(ALL_COLS);
+  try {
+    const saved = localStorage.getItem("triage.columns");
+    if (saved) {
+      const arr = JSON.parse(saved) as string[];
+      return new Set(arr.filter((c) => (ALL_COLS as readonly string[]).includes(c)) as ColKey[]);
+    }
+  } catch {}
+  return new Set(ALL_COLS);
+}
 
 function decisionRank(d: JobRow["decision"]) {
   if (d === "apply") return 0;
@@ -57,7 +86,6 @@ export function TriageApp() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [view, setView] = useState<AppView>("apply");
-  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const [search, setSearch] = useState("");
   const [decisionFilter, setDecisionFilter] = useState<string>("all");
@@ -68,8 +96,11 @@ export function TriageApp() {
   const [eligibilityFilter, setEligibilityFilter] = useState<string>("all");
   const [companyFilter, setCompanyFilter] = useState<string>("all");
   const [locationFilter, setLocationFilter] = useState<string>("all");
+  const [postedWithin, setPostedWithin] = useState<string>("all");
+  const [addedWithin, setAddedWithin] = useState<string>("all");
   const [sortKey, setSortKey] = useState<SortKey>("fitScore");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [visibleCols, setVisibleCols] = useState<Set<ColKey>>(readSavedCols);
 
   const loadDumps = useCallback(async () => {
     setDumpsLoading(true);
@@ -84,7 +115,7 @@ export function TriageApp() {
       setDumps(list);
       setDumpName((prev) => {
         let next: string | null;
-        if (prev === ALL_DUMPS) next = ALL_DUMPS;
+        if (prev === ALL_DUMPS || prev === ALL_DUMPS_ALL) next = prev;
         else if (prev && list.some((d) => d.name === prev)) next = prev;
         else next = list.length ? ALL_DUMPS : null;
         // Avoid empty-state flash between dumps settle and detail fetch.
@@ -101,8 +132,9 @@ export function TriageApp() {
   const loadDetail = useCallback(async (name: string) => {
     setLoading(true);
     try {
-      if (name === ALL_DUMPS) {
-        const res = await fetch("/api/inbox");
+      if (name === ALL_DUMPS || name === ALL_DUMPS_ALL) {
+        const url = name === ALL_DUMPS ? "/api/inbox" : "/api/inbox/all";
+        const res = await fetch(url);
         if (!res.ok) {
           const err = (await res.json()) as { error?: string };
           throw new Error(err.error || "Failed to load inbox");
@@ -115,7 +147,7 @@ export function TriageApp() {
         setDetail({
           dumpedAt: null,
           parsedAt: null,
-          source: "all-dumps",
+          source: name === ALL_DUMPS ? "all-dumps" : "all-browse",
           jobs: data.jobs || [],
           detailsOk: (data.jobs || []).filter((j) => j.description).length,
           stage3Ok: (data.jobs || []).length,
@@ -124,7 +156,8 @@ export function TriageApp() {
               .length,
             maybe: (data.jobs || []).filter((j) => j.decision === "maybe")
               .length,
-            skip: 0,
+            skip: (data.jobs || []).filter((j) => j.decision === "skip")
+              .length,
             total: data.totalRaw ?? (data.jobs || []).length,
           },
         });
@@ -230,6 +263,19 @@ export function TriageApp() {
     if (locationFilter !== "all") {
       rows = rows.filter((j) => j.location === locationFilter);
     }
+    if (postedWithin !== "all") {
+      const days = Number(postedWithin);
+      const cutoff = new Date(Date.now() - days * 86_400_000);
+      rows = rows.filter((j) => j.postedAt && new Date(j.postedAt) >= cutoff);
+    }
+    if (addedWithin !== "all") {
+      const days = Number(addedWithin);
+      const cutoff = new Date(Date.now() - days * 86_400_000);
+      rows = rows.filter((j) => {
+        const ts = j.trackedAt || j.postedAt;
+        return ts && new Date(ts) >= cutoff;
+      });
+    }
     const min = Number(minScore);
     if (Number.isFinite(min) && minScore.trim() !== "") {
       rows = rows.filter((j) => (j.fitScore ?? -1) >= min);
@@ -261,6 +307,8 @@ export function TriageApp() {
     eligibilityFilter,
     companyFilter,
     locationFilter,
+    postedWithin,
+    addedWithin,
     minScore,
     sortKey,
     sortDir,
@@ -280,19 +328,16 @@ export function TriageApp() {
     setSheetOpen(true);
   }
 
+  const isAllMode = dumpName === ALL_DUMPS || dumpName === ALL_DUMPS_ALL;
   const meta = detail
     ? [
-        dumpName === ALL_DUMPS
-          ? `${detail.jobs.length} inbox jobs (deduped)`
+        isAllMode
+          ? `${detail.jobs.length} jobs (deduped)`
           : `${detail.jobs.length} jobs`,
-        dumpName === ALL_DUMPS
-          ? null
-          : `${detail.detailsOk} with description`,
+        isAllMode ? null : `${detail.detailsOk} with description`,
         detail.stage3Summary
           ? `apply ${detail.stage3Summary.apply ?? 0} · maybe ${detail.stage3Summary.maybe ?? 0}${
-              dumpName === ALL_DUMPS
-                ? ""
-                : ` · skip ${detail.stage3Summary.skip ?? 0}`
+              isAllMode ? "" : ` · skip ${detail.stage3Summary.skip ?? 0}`
             }`
           : null,
         detail.dumpedAt ? `dumped ${detail.dumpedAt}` : null,
@@ -324,8 +369,8 @@ export function TriageApp() {
               <Select
                 key={dumps.map((d) => d.name).join("|") || "empty"}
                 value={
-                  dumpName === ALL_DUMPS
-                    ? ALL_DUMPS
+                  dumpName === ALL_DUMPS || dumpName === ALL_DUMPS_ALL
+                    ? dumpName
                     : dumpName && dumps.some((d) => d.name === dumpName)
                       ? dumpName
                       : null
@@ -339,7 +384,12 @@ export function TriageApp() {
                     {(value) => {
                       if (value === ALL_DUMPS) {
                         return (
-                          <span className="truncate">All dumps (Apply inbox)</span>
+                          <span className="truncate">All dumps — Apply inbox</span>
+                        );
+                      }
+                      if (value === ALL_DUMPS_ALL) {
+                        return (
+                          <span className="truncate">All dumps — Browse all</span>
                         );
                       }
                       const d = dumps.find((x) => x.name === value);
@@ -358,8 +408,11 @@ export function TriageApp() {
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={ALL_DUMPS} label="All dumps (Apply inbox)">
-                    All dumps (Apply inbox)
+                  <SelectItem value={ALL_DUMPS} label="All dumps — Apply inbox">
+                    All dumps — Apply inbox
+                  </SelectItem>
+                  <SelectItem value={ALL_DUMPS_ALL} label="All dumps — Browse all">
+                    All dumps — Browse all
                   </SelectItem>
                   {dumps.map((d) => (
                     <SelectItem
@@ -406,6 +459,7 @@ export function TriageApp() {
         ) : null
       ) : null}
 
+
       {/* Desktop top tabs */}
       <div className="hidden gap-2 md:flex">
         {(
@@ -433,12 +487,14 @@ export function TriageApp() {
       {/* PipelineBar always rendered — its terminal overlay must be visible on all views */}
       <PipelineBar
         dumps={dumps}
-        dumpName={dumpName === ALL_DUMPS ? dumps[0]?.name ?? null : dumpName}
+        dumpName={isAllMode ? dumps[0]?.name ?? null : dumpName}
         onDumpChange={setDumpName}
         showStages={view === "pipeline"}
         onJobFinished={() => void refreshAll()}
         onDumpReady={(name) => {
-          setDumpName(name);
+          // Only switch dump when the user is on the pipeline view —
+          // avoid overwriting the Apply inbox or Browse-all selection.
+          if (view === "pipeline") setDumpName(name);
           void refreshAll();
         }}
       />
@@ -467,8 +523,20 @@ export function TriageApp() {
 
       {view === "triage" ? (
       <>
-      <div className="space-y-3 rounded-xl border bg-card p-3 shadow-sm">
-        <div className="flex flex-wrap gap-2">
+      {/* ── Filter bar ─────────────────────────────────────────────────────── */}
+      <div className="rounded-xl border bg-card px-3 py-2.5 shadow-sm">
+        {/* Row 1: search */}
+        <div className="mb-2">
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search title, company, recommendation…"
+            className="h-9"
+          />
+        </div>
+
+        {/* Row 2: decision chips + tool buttons */}
+        <div className="flex items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {(
             [
               ["all", `All ${decisionCounts.all}`],
@@ -477,134 +545,217 @@ export function TriageApp() {
               ["skip", `Skip ${decisionCounts.skip}`],
               ["none", `Uneval ${decisionCounts.none}`],
             ] as const
-          ).map(([key, label]) => (
-            <Button
-              key={key}
-              size="sm"
-              className="min-h-11"
-              variant={decisionFilter === key ? "default" : "outline"}
-              onClick={() => setDecisionFilter(key)}
-            >
-              {label}
-            </Button>
-          ))}
-          <Button
-            size="sm"
-            variant="ghost"
-            className="min-h-11 md:hidden"
-            onClick={() => setFiltersOpen((o) => !o)}
-          >
-            {filtersOpen ? "Hide filters" : "More filters"}
-          </Button>
-        </div>
+          ).map(([key, label]) => {
+            const active = decisionFilter === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setDecisionFilter(key)}
+                className={cn(
+                  "shrink-0 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+                  active
+                    ? "border-foreground bg-foreground text-background shadow-sm"
+                    : "border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+              >
+                {active && <Check className="size-2.5" />}
+                {label}
+              </button>
+            );
+          })}
 
-        <div
-          className={cn(
-            "flex flex-wrap items-end gap-3",
-            !filtersOpen && "max-md:hidden"
-          )}
-        >
-          <div className="min-w-[200px] flex-1 space-y-1.5">
-            <Label className="text-xs">Search</Label>
-            <Input
-              className="min-h-11"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Title, company, recommendation…"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">Min score</Label>
-            <Input
-              className="w-20"
-              inputMode="numeric"
-              value={minScore}
-              onChange={(e) => setMinScore(e.target.value)}
-              placeholder="0"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">Eligibility</Label>
-            <Select
-              value={eligibilityFilter}
-              onValueChange={(v) => setEligibilityFilter(v ?? "all")}
+          <div className="flex-1" />
+
+          {/* Filters popover */}
+          {(() => {
+            const activeCount = [
+              minScore.trim() !== "",
+              eligibilityFilter !== "all",
+              companyFilter !== "all",
+              locationFilter !== "all",
+              hasDescription,
+              easyApplyOnly,
+              hasMaterials,
+              postedWithin !== "all",
+              addedWithin !== "all",
+            ].filter(Boolean).length;
+            return (
+              <Popover>
+                <PopoverTrigger
+                  className={cn(
+                    "shrink-0 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+                    activeCount > 0
+                      ? "border-primary/50 bg-primary/10 text-primary"
+                      : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                >
+                  <SlidersHorizontal className="size-3" />
+                  Filters{activeCount > 0 ? ` (${activeCount})` : ""}
+                </PopoverTrigger>
+                <PopoverContent className="w-80 p-4" align="end">
+                  <div className="space-y-4">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Filters</p>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Min score</Label>
+                      <Input
+                        className="h-8"
+                        inputMode="numeric"
+                        value={minScore}
+                        onChange={(e) => setMinScore(e.target.value)}
+                        placeholder="0"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Eligibility</Label>
+                      <Select value={eligibilityFilter} onValueChange={(v) => setEligibilityFilter(v ?? "all")}>
+                        <SelectTrigger className="h-8">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All</SelectItem>
+                          <SelectItem value="pass">Pass</SelectItem>
+                          <SelectItem value="fail">Fail</SelectItem>
+                          <SelectItem value="unknown">Unknown</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Company</Label>
+                      <Select value={companyFilter} onValueChange={(v) => setCompanyFilter(v ?? "all")}>
+                        <SelectTrigger className="h-8">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All companies</SelectItem>
+                          {companies.map((c) => (
+                            <SelectItem key={c} value={c}>{c}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Location</Label>
+                      <Select value={locationFilter} onValueChange={(v) => setLocationFilter(v ?? "all")}>
+                        <SelectTrigger className="h-8">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All locations</SelectItem>
+                          {locations.map((l) => (
+                            <SelectItem key={l} value={l}>{l}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Posted within</Label>
+                      <Select value={postedWithin} onValueChange={(v) => setPostedWithin(v ?? "all")}>
+                        <SelectTrigger className="h-8">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Any time</SelectItem>
+                          <SelectItem value="7">Last 7 days</SelectItem>
+                          <SelectItem value="14">Last 14 days</SelectItem>
+                          <SelectItem value="30">Last 30 days</SelectItem>
+                          <SelectItem value="60">Last 60 days</SelectItem>
+                          <SelectItem value="90">Last 90 days</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Added within</Label>
+                      <Select value={addedWithin} onValueChange={(v) => setAddedWithin(v ?? "all")}>
+                        <SelectTrigger className="h-8">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Any time</SelectItem>
+                          <SelectItem value="7">Last 7 days</SelectItem>
+                          <SelectItem value="14">Last 14 days</SelectItem>
+                          <SelectItem value="30">Last 30 days</SelectItem>
+                          <SelectItem value="60">Last 60 days</SelectItem>
+                          <SelectItem value="90">Last 90 days</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2 pt-1">
+                      <label className="flex cursor-pointer items-center gap-2 text-sm">
+                        <Checkbox checked={hasDescription} onCheckedChange={(v) => setHasDescription(v === true)} />
+                        Has description
+                      </label>
+                      <label className="flex cursor-pointer items-center gap-2 text-sm">
+                        <Checkbox checked={easyApplyOnly} onCheckedChange={(v) => setEasyApplyOnly(v === true)} />
+                        Easy Apply only
+                      </label>
+                      <label className="flex cursor-pointer items-center gap-2 text-sm">
+                        <Checkbox checked={hasMaterials} onCheckedChange={(v) => setHasMaterials(v === true)} />
+                        Has materials
+                      </label>
+                    </div>
+                    {activeCount > 0 && (
+                      <button
+                        type="button"
+                        className="w-full rounded-md border border-dashed py-1.5 text-xs text-muted-foreground hover:bg-muted"
+                        onClick={() => {
+                          setMinScore("");
+                          setEligibilityFilter("all");
+                          setCompanyFilter("all");
+                          setLocationFilter("all");
+                          setPostedWithin("all");
+                          setAddedWithin("all");
+                          setHasDescription(false);
+                          setEasyApplyOnly(false);
+                          setHasMaterials(false);
+                        }}
+                      >
+                        Clear all filters
+                      </button>
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            );
+          })()}
+
+          {/* Columns popover */}
+          <Popover>
+            <PopoverTrigger
+              className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
-              <SelectTrigger className="w-[140px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All</SelectItem>
-                <SelectItem value="pass">Pass</SelectItem>
-                <SelectItem value="fail">Fail</SelectItem>
-                <SelectItem value="unknown">Unknown</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">Company</Label>
-            <Select
-              value={companyFilter}
-              onValueChange={(v) => setCompanyFilter(v ?? "all")}
-            >
-              <SelectTrigger className="w-[160px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All</SelectItem>
-                {companies.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {c}
-                  </SelectItem>
+              <Columns3 className="size-3" />
+              Columns
+            </PopoverTrigger>
+            <PopoverContent className="w-48 p-3" align="end">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Columns</p>
+              <div className="space-y-2">
+                {ALL_COLS.map((col) => (
+                  <label key={col} className="flex cursor-pointer items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={visibleCols.has(col)}
+                      onCheckedChange={(v) => {
+                        setVisibleCols((prev) => {
+                          const next = new Set(prev);
+                          if (v === true) next.add(col);
+                          else next.delete(col);
+                          try { localStorage.setItem("triage.columns", JSON.stringify([...next])); } catch {}
+                          return next;
+                        });
+                      }}
+                    />
+                    {COL_LABELS[col]}
+                  </label>
                 ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">Location</Label>
-            <Select
-              value={locationFilter}
-              onValueChange={(v) => setLocationFilter(v ?? "all")}
-            >
-              <SelectTrigger className="w-[180px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All</SelectItem>
-                {locations.map((l) => (
-                  <SelectItem key={l} value={l}>
-                    {l}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <label className="flex items-center gap-2 pb-2 text-sm">
-            <Checkbox
-              checked={hasDescription}
-              onCheckedChange={(v) => setHasDescription(v === true)}
-            />
-            Has description
-          </label>
-          <label className="flex items-center gap-2 pb-2 text-sm">
-            <Checkbox
-              checked={easyApplyOnly}
-              onCheckedChange={(v) => setEasyApplyOnly(v === true)}
-            />
-            Easy Apply
-          </label>
-          <label className="flex items-center gap-2 pb-2 text-sm">
-            <Checkbox
-              checked={hasMaterials}
-              onCheckedChange={(v) => setHasMaterials(v === true)}
-            />
-            Has materials
-          </label>
-          <Badge variant="secondary" className="mb-1">
-            {filtered.length} shown
-          </Badge>
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          <span className="shrink-0 text-xs text-muted-foreground">{filtered.length} shown</span>
         </div>
       </div>
 
+      {/* ── Triage table ───────────────────────────────────────────────────── */}
       <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
         <Table>
           <TableHeader>
@@ -615,14 +766,13 @@ export function TriageApp() {
               >
                 Decision
               </TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead
-                className="cursor-pointer"
-                onClick={() => toggleSort("fitScore")}
-              >
-                Score
-              </TableHead>
-              <TableHead>Conf</TableHead>
+              {visibleCols.has("status") && <TableHead>Status</TableHead>}
+              {visibleCols.has("score") && (
+                <TableHead className="cursor-pointer" onClick={() => toggleSort("fitScore")}>
+                  Score
+                </TableHead>
+              )}
+              {visibleCols.has("conf") && <TableHead>Conf</TableHead>}
               <TableHead
                 className="cursor-pointer"
                 onClick={() => toggleSort("title")}
@@ -635,54 +785,35 @@ export function TriageApp() {
               >
                 Company
               </TableHead>
-              <TableHead>Location</TableHead>
-              <TableHead>Eligibility</TableHead>
-              <TableHead
-                className="cursor-pointer"
-                onClick={() => toggleSort("postedAt")}
-              >
-                Posted
-              </TableHead>
-              <TableHead>EA</TableHead>
+              {visibleCols.has("location") && <TableHead>Location</TableHead>}
+              {visibleCols.has("eligibility") && <TableHead>Eligibility</TableHead>}
+              {visibleCols.has("posted") && (
+                <TableHead className="cursor-pointer" onClick={() => toggleSort("postedAt")}>
+                  Posted
+                </TableHead>
+              )}
+              {visibleCols.has("ea") && <TableHead>EA</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
             {bootLoading
               ? Array.from({ length: 6 }).map((_, i) => (
                   <TableRow key={`sk-${i}`}>
-                    <TableCell>
-                      <Skeleton className="h-5 w-14" />
-                    </TableCell>
-                    <TableCell>
-                      <Skeleton className="h-5 w-16" />
-                    </TableCell>
-                    <TableCell>
-                      <Skeleton className="h-5 w-8" />
-                    </TableCell>
-                    <TableCell>
-                      <Skeleton className="h-5 w-10" />
-                    </TableCell>
-                    <TableCell>
-                      <Skeleton className="h-5 w-48 max-w-full" />
-                    </TableCell>
+                    <TableCell><Skeleton className="h-5 w-14" /></TableCell>
+                    {visibleCols.has("status") && <TableCell><Skeleton className="h-5 w-16" /></TableCell>}
+                    {visibleCols.has("score") && <TableCell><Skeleton className="h-5 w-8" /></TableCell>}
+                    {visibleCols.has("conf") && <TableCell><Skeleton className="h-5 w-10" /></TableCell>}
+                    <TableCell><Skeleton className="h-5 w-48 max-w-full" /></TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <Skeleton className="size-8 shrink-0 rounded-md" />
                         <Skeleton className="h-5 w-24" />
                       </div>
                     </TableCell>
-                    <TableCell>
-                      <Skeleton className="h-5 w-28" />
-                    </TableCell>
-                    <TableCell>
-                      <Skeleton className="h-5 w-14" />
-                    </TableCell>
-                    <TableCell>
-                      <Skeleton className="h-5 w-16" />
-                    </TableCell>
-                    <TableCell>
-                      <Skeleton className="h-5 w-4" />
-                    </TableCell>
+                    {visibleCols.has("location") && <TableCell><Skeleton className="h-5 w-28" /></TableCell>}
+                    {visibleCols.has("eligibility") && <TableCell><Skeleton className="h-5 w-14" /></TableCell>}
+                    {visibleCols.has("posted") && <TableCell><Skeleton className="h-5 w-16" /></TableCell>}
+                    {visibleCols.has("ea") && <TableCell><Skeleton className="h-5 w-4" /></TableCell>}
                   </TableRow>
                 ))
               : filtered.map((job) => (
@@ -697,30 +828,38 @@ export function TriageApp() {
                     <TableCell>
                       <DecisionBadge decision={job.decision ?? null} />
                     </TableCell>
-                    <TableCell>
-                      <TrackStatusBadge
-                        status={
-                          job.decision === "apply" || job.decision === "maybe"
-                            ? job.trackStatus || "todo"
-                            : job.trackStatus
-                        }
-                      />
-                    </TableCell>
-                    <TableCell className="tabular-nums">
-                      {job.fitScore == null ? "—" : job.fitScore}
-                    </TableCell>
-                    <TableCell className="tabular-nums text-muted-foreground">
-                      {job.confidence == null
-                        ? "—"
-                        : `${Math.round(job.confidence * 100)}%`}
-                    </TableCell>
+                    {visibleCols.has("status") && (
+                      <TableCell>
+                        <TrackStatusBadge
+                          status={
+                            job.decision === "apply" || job.decision === "maybe"
+                              ? job.trackStatus || "todo"
+                              : job.trackStatus
+                          }
+                        />
+                      </TableCell>
+                    )}
+                    {visibleCols.has("score") && (
+                      <TableCell className="tabular-nums">
+                        {job.fitScore == null ? "—" : job.fitScore}
+                      </TableCell>
+                    )}
+                    {visibleCols.has("conf") && (
+                      <TableCell className="tabular-nums text-muted-foreground">
+                        {job.confidence == null
+                          ? "—"
+                          : `${Math.round(job.confidence * 100)}%`}
+                      </TableCell>
+                    )}
                     <TableCell className="max-w-[280px] truncate font-medium">
                       {job.title || "—"}
                     </TableCell>
                     <TableCell>
                       <div className="flex max-w-[200px] flex-col gap-0.5">
                         <div className="flex items-center gap-2">
-                          <CompanyLogo src={job.logoUrl} company={job.company} />
+                          <div className="size-7 shrink-0 overflow-hidden rounded-md">
+                            <CompanyLogo src={job.logoUrl} company={job.company} />
+                          </div>
                           <span className="truncate">{job.company || "—"}</span>
                         </div>
                         {job.posterType === "agency" ? (
@@ -731,39 +870,50 @@ export function TriageApp() {
                         ) : null}
                       </div>
                     </TableCell>
-                    <TableCell className="max-w-[160px] truncate text-muted-foreground">
-                      {job.location || "—"}
-                    </TableCell>
-                    <TableCell>
-                      {job.evaluation?.eligibility?.status ? (
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            "capitalize",
-                            job.evaluation.eligibility.status === "pass" &&
-                              "border-emerald-600/40 bg-emerald-600/15 text-emerald-900",
-                            job.evaluation.eligibility.status === "fail" &&
-                              "border-rose-500/40 bg-rose-500/15 text-rose-900",
-                            job.evaluation.eligibility.status === "unknown" &&
-                              "border-zinc-400/40 bg-zinc-500/10"
-                          )}
-                        >
-                          {job.evaluation.eligibility.status}
-                        </Badge>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">
-                      {job.posted || "—"}
-                    </TableCell>
-                    <TableCell>{job.easyApply ? "✓" : ""}</TableCell>
+                    {visibleCols.has("location") && (
+                      <TableCell className="max-w-[160px] truncate text-muted-foreground">
+                        {job.location || "—"}
+                      </TableCell>
+                    )}
+                    {visibleCols.has("eligibility") && (
+                      <TableCell>
+                        {job.evaluation?.eligibility?.status ? (
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "capitalize",
+                              job.evaluation.eligibility.status === "pass" &&
+                                "border-emerald-600/40 bg-emerald-600/15 text-emerald-900",
+                              job.evaluation.eligibility.status === "fail" &&
+                                "border-rose-500/40 bg-rose-500/15 text-rose-900",
+                              job.evaluation.eligibility.status === "unknown" &&
+                                "border-zinc-400/40 bg-zinc-500/10"
+                            )}
+                          >
+                            {job.evaluation.eligibility.status}
+                          </Badge>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                    )}
+                    {visibleCols.has("posted") && (
+                      <TableCell className="whitespace-nowrap text-muted-foreground">
+                        {job.posted || "—"}
+                      </TableCell>
+                    )}
+                    {visibleCols.has("ea") && (
+                      <TableCell>{job.easyApply ? "✓" : ""}</TableCell>
+                    )}
                   </TableRow>
                 ))}
             {!bootLoading && !filtered.length && (
               <TableRow>
                 <TableCell
-                  colSpan={10}
+                  colSpan={
+                    2 + // decision + title + company
+                    [...visibleCols].length
+                  }
                   className="h-24 text-center text-muted-foreground"
                 >
                   {dumpName

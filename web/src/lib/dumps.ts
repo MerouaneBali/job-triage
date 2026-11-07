@@ -373,6 +373,63 @@ export function loadInboxJobs(): {
   }
 }
 
+/** All jobs across all dumps, deduped — no decision filter (includes unevaluated). */
+export function loadAllJobs(): {
+  jobs: JobRow[];
+  totalRaw: number;
+  dumpsTouched: number;
+} {
+  const { db: dbPath } = dataPaths();
+  if (!existsSync(dbPath)) return { jobs: [], totalRaw: 0, dumpsTouched: 0 };
+  const db = openAppDb();
+  try {
+    const rows = db
+      .prepare(
+        `
+      SELECT j.*, d.basename AS dump_basename
+      FROM jobs j
+      JOIN dumps d ON d.id = j.dump_id
+      ORDER BY COALESCE(d.updated_at, d.parsed_at, d.dumped_at) DESC
+    `
+      )
+      .all() as Array<Record<string, unknown>>;
+
+    const mapped: JobRow[] = rows.map((row) => ({
+      ...rowToJob(row),
+      dumpName: (row.dump_basename as string) || null,
+    }));
+
+    const byId = new Map<string, JobRow>();
+    for (const job of mapped) {
+      const id = String(job.id);
+      const prev = byId.get(id);
+      byId.set(id, prev ? preferInboxJob(prev, job) : job);
+    }
+
+    const byFp = new Map<string, JobRow>();
+    const noFp: JobRow[] = [];
+    for (const job of byId.values()) {
+      const fp = jobFingerprint(job.title, job.company);
+      if (!fp) {
+        noFp.push(job);
+        continue;
+      }
+      const prev = byFp.get(fp);
+      byFp.set(fp, prev ? preferInboxJob(prev, job) : job);
+    }
+
+    const jobs = [...byFp.values(), ...noFp].sort(
+      (a, b) => (b.fitScore ?? 0) - (a.fitScore ?? 0)
+    );
+    const dumpsTouched = new Set(
+      mapped.map((j) => j.dumpName).filter(Boolean)
+    ).size;
+    return { jobs, totalRaw: mapped.length, dumpsTouched };
+  } finally {
+    db.close();
+  }
+}
+
 export function mergeDump(stage1Name: string): DumpDetail {
   const stem = safeBasename(stage1Name);
   if (!stem) throw new Error("Invalid dump name");

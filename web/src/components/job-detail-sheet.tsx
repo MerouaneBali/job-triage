@@ -240,160 +240,177 @@ export function JobDetailSheet({
       >
         {job ? (
           <>
-            <SheetHeader className="shrink-0 border-b">
-              {/* Mobile: stacked header. Desktop: logo | title+badge side-by-side */}
-              <div className="flex flex-col gap-3 pr-8 sm:flex-row sm:items-start">
-                <div className="flex items-start gap-3 sm:contents">
+            {/* ═══════════════ HEADER ═══════════════ */}
+            <SheetHeader className="shrink-0 gap-0 border-b p-0">
+
+              {/* ── Identity ─────────────────────────── */}
+              <div className="flex items-start gap-3 p-4 pb-3 pr-10">
+                <div className="size-11 shrink-0 overflow-hidden rounded-lg border bg-muted">
                   <CompanyLogo
                     src={job.logoUrl}
                     company={job.company}
-                    className="size-10 shrink-0"
+                    className="size-full"
                   />
-                  <div className="min-w-0 flex-1 space-y-1.5 sm:space-y-1">
-                    <SheetTitle className="text-base leading-snug sm:text-lg">
-                      {job.title || "Untitled role"}
-                    </SheetTitle>
-                    <SheetDescription className="flex flex-wrap items-center gap-2 text-sm">
-                      <span>
-                        {[job.company, job.location]
-                          .filter(Boolean)
-                          .join(" · ") || "No company / location"}
-                      </span>
-                      {job.posterType === "agency" ? (
-                        <span
-                          className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-400"
-                          title="Posted by a recruitment agency — the actual employer may not be named"
-                        >
-                          <UserRound className="size-2.5" />
-                          Agency
-                        </span>
-                      ) : null}
-                    </SheetDescription>
-                    {/* Decision + status pickers — always visible */}
-                    <div className="flex flex-wrap items-center gap-2">
-                      {/* Decision */}
-                      <Select
-                        value={job.decision ?? "none"}
-                        disabled={saving || !job.dumpName}
-                        onValueChange={(v) =>
-                          void patchJob({ decision: v === "none" ? null : (v as Decision) })
-                        }
+                </div>
+                <div className="min-w-0 flex-1">
+                  <SheetTitle className="text-base leading-snug sm:text-lg">
+                    {job.title || "Untitled role"}
+                  </SheetTitle>
+                  <SheetDescription className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                    <span className="font-medium text-foreground/80">
+                      {[job.company, job.location].filter(Boolean).join(" · ") || "No company / location"}
+                    </span>
+                    {job.posterType === "agency" ? (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-400"
+                        title="Posted by a recruitment agency — the actual employer may not be named"
                       >
-                        <SelectTrigger className={cn(
-                          "h-6 w-auto shrink-0 rounded-full border px-2.5 text-[11px] font-medium focus:ring-0",
-                          DECISION_OPTIONS.find((o) => o.value === (job.decision ?? "none"))?.className,
-                        )}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {DECISION_OPTIONS.map((opt) => (
-                            <SelectItem key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {/* Track status */}
-                      {job.dumpName ? (
-                        <Select
-                          value={job.trackStatus ?? "todo"}
-                          disabled={saving}
-                          onValueChange={(v) => {
-                            const next = v as TrackStatus;
-                            void patchJob({
-                              trackStatus: next,
-                              applyChannel:
-                                next === "applied" && !job.applyChannel
-                                  ? job.easyApply ? "easy_apply" : "external"
-                                  : job.applyChannel,
-                            });
-                          }}
-                        >
-                          <SelectTrigger className={cn(
-                            "h-6 w-auto shrink-0 rounded-full border px-2.5 text-[11px] font-medium focus:ring-0",
-                            TRACK_STATUS_META[job.trackStatus ?? "todo"].className,
-                          )}>
-                            <SelectValue>
-                              {(value) => {
-                                const s = (value as TrackStatus) ?? "todo";
-                                const meta = TRACK_STATUS_META[s];
-                                const Icon = meta?.icon;
-                                return Icon ? (
-                                  <span className="inline-flex items-center gap-1">
-                                    <Icon className="size-3 shrink-0" aria-hidden />
-                                    {meta.label}
-                                  </span>
-                                ) : null;
-                              }}
-                            </SelectValue>
-                          </SelectTrigger>
-                          <SelectContent>
-                            {STATUS_OPTIONS.map((opt) => {
-                              const Icon = opt.icon;
-                              return (
-                                <SelectItem key={opt.value} value={opt.value}>
-                                  <span className="inline-flex items-center gap-2">
-                                    <Icon className="size-3.5 shrink-0" aria-hidden />
-                                    {opt.label}
-                                  </span>
-                                </SelectItem>
-                              );
-                            })}
-                          </SelectContent>
-                        </Select>
-                      ) : null}
-                      {/* Apply channel — when applied/waiting */}
-                      {job.dumpName && (job.trackStatus === "applied" || job.trackStatus === "waiting" || job.applyChannel) ? (
-                        <Select
-                          value={job.applyChannel ?? ""}
-                          disabled={saving}
-                          onValueChange={(v) => void patchJob({ applyChannel: v as ApplyChannel })}
-                        >
-                          <SelectTrigger className="h-6 w-auto shrink-0 rounded-full border px-2.5 text-[11px] font-medium focus:ring-0">
-                            <SelectValue placeholder="Channel…" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {CHANNEL_OPTIONS.map((opt) => (
-                              <SelectItem key={opt.value} value={opt.value}>
-                                {opt.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      ) : null}
-                      {job.fitScore != null ? (
-                        <Badge variant="secondary">Score {job.fitScore}</Badge>
-                      ) : null}
-                    </div>
-                  </div>
+                        <UserRound className="size-2.5" />
+                        Agency
+                      </span>
+                    ) : null}
+                  </SheetDescription>
                 </div>
               </div>
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                {job.confidence != null ? (
-                  <Badge variant="secondary">
-                    Conf {(job.confidence * 100).toFixed(0)}%
-                  </Badge>
-                ) : null}
-                {elig ? (
-                  <Badge
-                    variant="outline"
-                    className={cn("capitalize", ELIGIBILITY_STYLES[elig])}
+
+              {/* ── Interactive controls (selects) ───── */}
+              <div className="flex flex-wrap items-center gap-2 border-y bg-muted/40 px-4 py-2.5">
+                {/* Decision */}
+                <Select
+                  value={job.decision ?? "none"}
+                  disabled={saving || !job.dumpName}
+                  onValueChange={(v) =>
+                    void patchJob({ decision: v === "none" ? null : (v as Decision) })
+                  }
+                >
+                  <SelectTrigger className={cn(
+                    "h-8 w-auto shrink-0 rounded-lg border px-3 text-xs font-semibold shadow-sm focus:ring-0 focus:ring-offset-0",
+                    DECISION_OPTIONS.find((o) => o.value === (job.decision ?? "none"))?.className,
+                  )}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DECISION_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                {/* Track status */}
+                {job.dumpName ? (
+                  <Select
+                    value={job.trackStatus ?? "todo"}
+                    disabled={saving}
+                    onValueChange={(v) => {
+                      const next = v as TrackStatus;
+                      void patchJob({
+                        trackStatus: next,
+                        applyChannel:
+                          next === "applied" && !job.applyChannel
+                            ? job.easyApply ? "easy_apply" : "external"
+                            : job.applyChannel,
+                      });
+                    }}
                   >
-                    Eligibility {elig}
-                  </Badge>
+                    <SelectTrigger className={cn(
+                      "h-8 w-auto shrink-0 rounded-lg border px-3 text-xs font-semibold shadow-sm focus:ring-0 focus:ring-offset-0",
+                      TRACK_STATUS_META[job.trackStatus ?? "todo"].className,
+                    )}>
+                      <SelectValue>
+                        {(value) => {
+                          const s = (value as TrackStatus) ?? "todo";
+                          const meta = TRACK_STATUS_META[s];
+                          const Icon = meta?.icon;
+                          return Icon ? (
+                            <span className="inline-flex items-center gap-1.5">
+                              <Icon className="size-3.5 shrink-0" aria-hidden />
+                              {meta.label}
+                            </span>
+                          ) : null;
+                        }}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {STATUS_OPTIONS.map((opt) => {
+                        const Icon = opt.icon;
+                        return (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            <span className="inline-flex items-center gap-2">
+                              <Icon className="size-3.5 shrink-0" aria-hidden />
+                              {opt.label}
+                            </span>
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
                 ) : null}
-                {job.easyApply ? (
-                  <Badge variant="outline">Easy Apply</Badge>
+
+                {/* Apply channel — only when relevant */}
+                {job.dumpName && (job.trackStatus === "applied" || job.trackStatus === "waiting" || job.applyChannel) ? (
+                  <Select
+                    value={job.applyChannel ?? ""}
+                    disabled={saving}
+                    onValueChange={(v) => void patchJob({ applyChannel: v as ApplyChannel })}
+                  >
+                    <SelectTrigger className="h-8 w-auto shrink-0 rounded-lg border px-3 text-xs font-semibold shadow-sm focus:ring-0 focus:ring-offset-0">
+                      <SelectValue placeholder="Channel…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CHANNEL_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 ) : null}
+
+                {saving ? <Loader2 className="size-3.5 animate-spin text-muted-foreground" /> : null}
+              </div>
+
+              {/* ── Read-only info chips ──────────────── */}
+              {(job.fitScore != null || job.confidence != null || elig || job.easyApply) ? (
+                <div className="flex flex-wrap items-center gap-1.5 border-b bg-muted/40 px-4 py-2.5">
+                  {job.fitScore != null ? (
+                    <span className="inline-flex h-7 items-center rounded-full border bg-background px-3 text-xs font-medium tabular-nums text-muted-foreground">
+                      Score {job.fitScore}
+                    </span>
+                  ) : null}
+                  {job.confidence != null ? (
+                    <span className="inline-flex h-7 items-center rounded-full border bg-background px-3 text-xs font-medium tabular-nums text-muted-foreground">
+                      {(job.confidence * 100).toFixed(0)}% conf
+                    </span>
+                  ) : null}
+                  {elig ? (
+                    <span className={cn(
+                      "inline-flex h-7 items-center rounded-full border px-3 text-xs font-medium capitalize",
+                      ELIGIBILITY_STYLES[elig],
+                    )}>
+                      Eligibility {elig}
+                    </span>
+                  ) : null}
+                  {job.easyApply ? (
+                    <span className="inline-flex h-7 items-center rounded-full border bg-background px-3 text-xs font-medium text-muted-foreground">
+                      Easy Apply
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {/* ── Action buttons ────────────────────── */}
+              <div className="flex flex-wrap items-center gap-2 px-4 py-2.5">
                 {job.url ? (
                   <a
                     href={job.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex h-7 items-center gap-1.5 rounded-lg bg-[#0A66C2] px-2.5 text-xs font-medium whitespace-nowrap text-white hover:bg-[#004182]"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#0A66C2] px-3 text-xs font-semibold whitespace-nowrap text-white shadow-sm hover:bg-[#004182] active:bg-[#003177]"
                   >
                     <LinkedInIcon className="size-3.5 shrink-0" />
-                    Open on LinkedIn
+                    LinkedIn
                   </a>
                 ) : null}
                 {job.dumpName ? (
@@ -402,14 +419,14 @@ export function JobDetailSheet({
                     onClick={() => void handleEvaluate()}
                     disabled={evaluating || pendingRefresh || !!generating}
                     title={job.evaluation ? "Re-run AI evaluation for this job" : "Run AI evaluation for this job"}
-                    className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-violet-300 bg-violet-50 px-2.5 text-xs font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50 dark:border-violet-700 dark:bg-violet-950/30 dark:text-violet-400 dark:hover:bg-violet-950/60"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-violet-300 bg-violet-50 px-3 text-xs font-semibold text-violet-700 shadow-sm hover:bg-violet-100 active:bg-violet-200 disabled:opacity-50 dark:border-violet-700 dark:bg-violet-950/30 dark:text-violet-400 dark:hover:bg-violet-950/60"
                   >
                     {evaluating || pendingRefresh ? (
                       <Loader2 className="size-3.5 animate-spin" />
                     ) : (
                       <Sparkles className="size-3.5" />
                     )}
-                    {evaluating ? "Starting…" : pendingRefresh ? "Evaluating…" : job.evaluation ? "Re-evaluate" : "Evaluate with AI"}
+                    {evaluating ? "Starting…" : pendingRefresh ? "Evaluating…" : job.evaluation ? "Re-evaluate" : "Evaluate"}
                   </button>
                 ) : null}
                 {job.dumpName ? (
@@ -418,7 +435,7 @@ export function JobDetailSheet({
                     onClick={() => void handleDelete()}
                     disabled={deleting}
                     title="Delete this job"
-                    className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-rose-200 px-2.5 text-xs font-medium text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-800 dark:text-rose-400 dark:hover:bg-rose-950/40"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-rose-200 px-3 text-xs font-semibold text-rose-600 shadow-sm hover:bg-rose-50 active:bg-rose-100 disabled:opacity-50 dark:border-rose-800 dark:text-rose-400 dark:hover:bg-rose-950/40"
                   >
                     {deleting ? (
                       <Loader2 className="size-3.5 animate-spin" />
@@ -429,6 +446,7 @@ export function JobDetailSheet({
                   </button>
                 ) : null}
               </div>
+
             </SheetHeader>
 
             <ScrollArea className="min-h-0 flex-1">

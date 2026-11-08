@@ -221,7 +221,6 @@ function killPidTree(pid: number, signal: "SIGTERM" | "SIGKILL") {
     execFile(
       "taskkill",
       ["/pid", String(pid), "/T", ...(signal === "SIGKILL" ? ["/F"] : [])],
-      { stdio: "ignore" },
       () => {}
     );
     return;
@@ -230,7 +229,6 @@ function killPidTree(pid: number, signal: "SIGTERM" | "SIGKILL") {
   execFile(
     "pkill",
     [signal === "SIGKILL" ? "-KILL" : "-TERM", "-P", String(pid)],
-    { stdio: "ignore" },
     () => {}
   );
   try {
@@ -277,7 +275,7 @@ function pkillPipelineChildren(mode: PipelineStopMode) {
     "src/stage3/run.mjs",
     "src/stage1/parse-jobs.mjs",
   ]) {
-    execFile("pkill", [sig, "-f", pat], { stdio: "ignore" }, () => {});
+    execFile("pkill", [sig, "-f", pat], () => {});
   }
   if (mode === "safe") {
     setTimeout(() => {
@@ -286,7 +284,7 @@ function pkillPipelineChildren(mode: PipelineStopMode) {
         "src/stage3/run.mjs",
         "src/stage1/parse-jobs.mjs",
       ]) {
-        execFile("pkill", ["-KILL", "-f", pat], { stdio: "ignore" }, () => {});
+        execFile("pkill", ["-KILL", "-f", pat], () => {});
       }
     }, 1500);
   }
@@ -421,8 +419,8 @@ function startChild(
       emit(job, { type: "log", line, stream });
     }
   };
-  child.stdout.on("data", onChunk("stdout"));
-  child.stderr.on("data", onChunk("stderr"));
+  child.stdout?.on("data", onChunk("stdout"));
+  child.stderr?.on("data", onChunk("stderr"));
 
   child.on("error", (err) => {
     job.child = null;
@@ -639,8 +637,8 @@ function spawnLogged(
         emit(job, { type: "log", line, stream });
       }
     };
-    child.stdout.on("data", onChunk("stdout"));
-    child.stderr.on("data", onChunk("stderr"));
+    child.stdout?.on("data", onChunk("stdout"));
+    child.stderr?.on("data", onChunk("stderr"));
     child.on("error", (err) => {
       job.child = null;
       job.childPid = null;

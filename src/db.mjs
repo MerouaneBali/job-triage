@@ -578,7 +578,7 @@ export function listDumpsSummary(db) {
     .all();
 }
 
-function parseJsonCol(s) {
+export function parseJsonCol(s) {
   if (!s) return null;
   try {
     return JSON.parse(s);

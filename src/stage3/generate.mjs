@@ -1,7 +1,7 @@
 import { GENERATE_TOOL, generateSchema } from "./schemas.mjs";
 import { hashText } from "./cache.mjs";
 
-export const GENERATE_PROMPT_VERSION = "generate-v5";
+export const GENERATE_PROMPT_VERSION = "generate-v6";
 
 function buildSystem(what) {
   const skip = [];
@@ -32,7 +32,7 @@ Outreach message rules:
 - Open with exactly: Hi [Name],
 - Leave [Name] as a literal placeholder. The candidate fills it in manually.
 - Total length: three to five sentences. Hard limit. This is not a cover letter.
-- Close with one line: "Happy to chat if you are open to it." Nothing longer.
+- Close with one line: "Happy to chat." Nothing longer. No qualifiers, no "if you are open to it."
 
 How to open (this is the hardest part -- get it right):
 - After "Hi [Name]," add one short warm line before the pitch. Something like "Hope you are doing well." or "Hope things are going well on your end." Keep it short and natural. Do not skip this line and jump straight into the pitch.
@@ -50,8 +50,12 @@ How to state fit -- THIS IS THE MOST IMPORTANT RULE:
 - One concrete detail that shows real experience, not just tool familiarity.
 
 Remote and location:
-- If the job has a location restriction but is remote: one casual sentence, then move on. Keep it brief and natural. Example: "Five years working remotely for UK and Spain-based companies, all compliance on my side." Do not ask if they are open to international candidates.
-- Only include this if location is actually a potential concern for this job. Do not force it in if it is not relevant.
+- Only mention remote/location if the job explicitly has a geographic restriction and it is a real concern. Do not force it in otherwise.
+- If you do mention it, fold it into the fit sentence naturally. Example: "I have been contracting remotely for UK and Spain companies for about five years, so the logistics are sorted." Do NOT write it as a standalone sentence that reads like a legal disclaimer. "All compliance on my side" is too cold and formal -- it sounds like a legal disclaimer, not a human talking.
+- Never pre-empt an objection they have not raised. That signals you expect rejection.
+
+Closing line:
+- End with: "Happy to chat." -- confident, clean, full stop. Do not add "if you are open to it" or any qualifier. That phrasing is passive and sounds like you are asking for permission.
 
 Bad outreach examples (do not write anything like these):
 - Hook about code review, then: "Most of my recent work is Next.js and React for a Spain-based telecom company, including a customer portal that replaced a Flutter web build." -- the Flutter migration has nothing to do with code review. This is the pivot-to-random-facts failure.

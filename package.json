@@ -9,8 +9,8 @@
     "fetch-details": "node src/stage2/fetch-details.mjs",
     "stage3": "node src/stage3/run.mjs",
     "migrate:db": "node scripts/migrate-json-to-sqlite.mjs",
-    "preview": "node -e \"if(Number(process.versions.node.split('.')[0])<22){console.error('Job triage web UI needs Node 22+. Run: nvm use');process.exit(1)}\" && npm run dev --prefix web",
-    "dev:web": "npm run preview",
+    "dev": "node -e \"if(Number(process.versions.node.split('.')[0])<22){console.error('Job triage web UI needs Node 22+. Run: nvm use');process.exit(1)}\" && npm run dev --prefix web",
+    "preview": "node -e \"if(Number(process.versions.node.split('.')[0])<22){console.error('Job triage web UI needs Node 22+. Run: nvm use');process.exit(1)}\" && npm run start --prefix web",
     "postinstall": "npx playwright install chromium"
   },
   "dependencies": {

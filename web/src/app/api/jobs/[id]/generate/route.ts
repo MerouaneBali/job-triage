@@ -47,7 +47,7 @@ export async function POST(req: Request, ctx: Ctx) {
   return new Promise<NextResponse>((resolve) => {
     execFile(
       process.execPath,
-      ["--input-type=module", ...scriptArgs],
+      scriptArgs,
       {
         cwd: root,
         timeout: 110_000,

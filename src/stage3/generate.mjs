@@ -1,7 +1,7 @@
 import { GENERATE_TOOL, generateSchema } from "./schemas.mjs";
 import { hashText } from "./cache.mjs";
 
-export const GENERATE_PROMPT_VERSION = "generate-v2";
+export const GENERATE_PROMPT_VERSION = "generate-v4";
 
 function buildSystem(what) {
   const skip = [];
@@ -31,11 +31,28 @@ Writing style -- apply to every word you write:
 Outreach message rules:
 - Open with exactly: Hi [Name],
 - Leave [Name] as a literal placeholder. The candidate fills it in manually.
-- First sentence: something specific and genuine about the role or company. Not about the candidate.
-- Second and third sentences: brief, specific fit. What makes this a real match, not generic praise.
-- If the job has a location restriction but is remote: one sentence stating the remote track record as a fact, then move on. Example: "For the past five years I have worked remotely on long-term contracts with companies in the UK and Spain, handling all the compliance side independently." Do not ask if they are open to it.
-- Close with one line. Something like "Happy to chat if you are open to it." Nothing longer.
-- Total length: three to five sentences maximum. This is not a cover letter.
+- Total length: three to five sentences. Hard limit. This is not a cover letter.
+- Close with one line: "Happy to chat if you are open to it." Nothing longer.
+
+How to open (this is the hardest part -- get it right):
+- After "Hi [Name]," add one short warm line before the pitch. Something like "Hope you are doing well." or "Hope things are going well on your end." Keep it short and natural. Do not skip this line and jump straight into the pitch.
+- Then: pick ONE specific thing from the job that actually resonates. Could be the product, the problem they are solving, the technical setup, or what the role involves day to day.
+- React to it in plain human language. Something like: "I came across your posting for [role] and [one thing] caught my eye."
+- Do NOT rephrase or summarize the job description back at them. That is the most robotic thing you can do. If the job says "frontend depth and written reasoning", do not write "the mix of frontend depth and written reasoning stands out". Pick ONE real detail and react to it naturally.
+- Do not start with complimenting the company in a vague way. No "I am impressed by what you are building at X."
+
+How to state fit (second and third sentences):
+- One clear sentence: "I have been doing [very similar thing] for [type of company/product]." Not a list of technologies. Not "My stack is X, Y and Z used on A, B and C."
+- If you mention technologies, fold them into a clause, not a list. "building e-commerce platforms in React and Next.js" not "React, Next.js, TypeScript, used on a white-label telecom platform, a Shopify subscription storefront and a React Native delivery app."
+- One concrete detail that shows real experience, not just tool familiarity.
+
+Remote and location:
+- If the job has a location restriction but is remote: one casual sentence, then move on. Keep it brief and natural. Example: "Five years working remotely for UK and Spain-based companies, all compliance on my side." Do not ask if they are open to international candidates.
+
+Bad outreach (do not write anything like this):
+- "The mix of frontend depth and written reasoning in this role stands out, especially the focus on explaining architectural choices." -- this is the job posting rephrased back at them
+- "My day-to-day stack is React, Next.js and TypeScript, used on a white-label telecom platform, a Shopify subscription storefront and a React Native delivery app." -- this is a resume dump, not a sentence
+- "I am reaching out to express my interest in the [X] role at [Y]." -- template filler
 
 Cover letter rules:
 - Slightly more formal than outreach but still human. Not stiff.

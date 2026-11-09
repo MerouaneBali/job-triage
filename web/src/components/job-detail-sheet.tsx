@@ -25,7 +25,7 @@ import {
 import { TRACK_STATUS_META } from "@/components/track-status-badge";
 import type { ApplyChannel, Decision, JobRow, TrackStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { Loader2, Sparkles, Trash2, UserRound } from "lucide-react";
+import { Loader2, RefreshCw, Sparkles, Trash2, UserRound } from "lucide-react";
 import { toast } from "sonner";
 
 const DECISION_OPTIONS: { value: Decision | "none"; label: string; className: string }[] = [
@@ -62,16 +62,21 @@ function LinkedInIcon({ className }: { className?: string }) {
 
 function Section({
   title,
+  action,
   children,
 }: {
   title: string;
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <section className="space-y-2">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {title}
-      </h3>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {title}
+        </h3>
+        {action}
+      </div>
       {children}
     </section>
   );
@@ -211,14 +216,14 @@ export function JobDetailSheet({
     }
   }
 
-  async function generate(what: string[]) {
+  async function generate(what: string[], force = false) {
     if (!job?.id || generating) return;
     setGenerating(what.join(","));
     try {
       const res = await fetch(`/api/jobs/${job.id}/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dumpBasename: job.dumpName, what }),
+        body: JSON.stringify({ dumpBasename: job.dumpName, what, force }),
       });
       const data = (await res.json()) as { ok?: boolean; materials?: JobRow["materials"]; error?: string };
       if (!res.ok || !data.ok) throw new Error(data.error || "Failed");
@@ -557,14 +562,25 @@ export function JobDetailSheet({
                     ) : (
                       <>
                         {/* Cover letter */}
-                        {materials?.coverLetter ? (
-                          <Section title="Cover letter">
+                        <Section
+                          title="Cover letter"
+                          action={materials?.coverLetter ? (
+                            <button
+                              type="button"
+                              disabled={!!generating}
+                              onClick={() => void generate(["coverLetter"], true)}
+                              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
+                            >
+                              {generating === "coverLetter" ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+                              Retry
+                            </button>
+                          ) : undefined}
+                        >
+                          {materials?.coverLetter ? (
                             <p className="rounded-md border bg-muted/40 p-3 text-sm leading-relaxed whitespace-pre-wrap">
                               {materials.coverLetter}
                             </p>
-                          </Section>
-                        ) : (
-                          <Section title="Cover letter">
+                          ) : (
                             <Button
                               size="sm"
                               variant="outline"
@@ -572,25 +588,32 @@ export function JobDetailSheet({
                               disabled={!!generating}
                               onClick={() => void generate(["coverLetter"])}
                             >
-                              {generating === "coverLetter" ? (
-                                <Loader2 className="size-3.5 animate-spin" />
-                              ) : (
-                                <Sparkles className="size-3.5" />
-                              )}
+                              {generating === "coverLetter" ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
                               Generate cover letter
                             </Button>
-                          </Section>
-                        )}
+                          )}
+                        </Section>
 
                         {/* Outreach */}
-                        {materials?.outreachMessage ? (
-                          <Section title="Outreach message">
+                        <Section
+                          title="Outreach message"
+                          action={materials?.outreachMessage ? (
+                            <button
+                              type="button"
+                              disabled={!!generating}
+                              onClick={() => void generate(["outreach"], true)}
+                              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
+                            >
+                              {generating === "outreach" ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+                              Retry
+                            </button>
+                          ) : undefined}
+                        >
+                          {materials?.outreachMessage ? (
                             <p className="rounded-md border bg-muted/40 p-3 text-sm leading-relaxed whitespace-pre-wrap">
                               {materials.outreachMessage}
                             </p>
-                          </Section>
-                        ) : (
-                          <Section title="Outreach message">
+                          ) : (
                             <Button
                               size="sm"
                               variant="outline"
@@ -598,25 +621,32 @@ export function JobDetailSheet({
                               disabled={!!generating}
                               onClick={() => void generate(["outreach"])}
                             >
-                              {generating === "outreach" ? (
-                                <Loader2 className="size-3.5 animate-spin" />
-                              ) : (
-                                <Sparkles className="size-3.5" />
-                              )}
+                              {generating === "outreach" ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
                               Generate outreach
                             </Button>
-                          </Section>
-                        )}
+                          )}
+                        </Section>
 
                         {/* Strategy */}
-                        {materials?.strategy ? (
-                          <Section title="Strategy">
+                        <Section
+                          title="Strategy"
+                          action={materials?.strategy ? (
+                            <button
+                              type="button"
+                              disabled={!!generating}
+                              onClick={() => void generate(["strategy"], true)}
+                              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
+                            >
+                              {generating === "strategy" ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+                              Retry
+                            </button>
+                          ) : undefined}
+                        >
+                          {materials?.strategy ? (
                             <p className="text-sm leading-relaxed whitespace-pre-wrap">
                               {materials.strategy}
                             </p>
-                          </Section>
-                        ) : (
-                          <Section title="Strategy">
+                          ) : (
                             <Button
                               size="sm"
                               variant="outline"
@@ -624,27 +654,34 @@ export function JobDetailSheet({
                               disabled={!!generating}
                               onClick={() => void generate(["strategy"])}
                             >
-                              {generating === "strategy" ? (
-                                <Loader2 className="size-3.5 animate-spin" />
-                              ) : (
-                                <Sparkles className="size-3.5" />
-                              )}
+                              {generating === "strategy" ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
                               Generate strategy
                             </Button>
-                          </Section>
-                        )}
+                          )}
+                        </Section>
 
                         {/* Questions */}
-                        {materials?.questionsToAsk?.length ? (
-                          <Section title="Questions to ask">
+                        <Section
+                          title="Questions to ask"
+                          action={materials?.questionsToAsk?.length ? (
+                            <button
+                              type="button"
+                              disabled={!!generating}
+                              onClick={() => void generate(["questions"], true)}
+                              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
+                            >
+                              {generating?.includes("questions") ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+                              Retry
+                            </button>
+                          ) : undefined}
+                        >
+                          {materials?.questionsToAsk?.length ? (
                             <ul className="list-disc space-y-1 pl-4 text-sm">
                               {materials.questionsToAsk.map((q) => (
                                 <li key={q}>{q}</li>
                               ))}
                             </ul>
-                          </Section>
-                        ) : !materials ? (
-                          <Section title="Questions to ask">
+                          ) : !materials ? (
                             <Button
                               size="sm"
                               variant="outline"
@@ -652,26 +689,35 @@ export function JobDetailSheet({
                               disabled={!!generating}
                               onClick={() => void generate(["questions", "cv"])}
                             >
-                              {generating?.includes("questions") ? (
-                                <Loader2 className="size-3.5 animate-spin" />
-                              ) : (
-                                <Sparkles className="size-3.5" />
-                              )}
+                              {generating?.includes("questions") ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
                               Generate questions &amp; CV tips
                             </Button>
-                          </Section>
-                        ) : null}
+                          ) : null}
+                        </Section>
 
                         {/* CV tailoring */}
-                        {materials?.cvTailoringSuggestions?.length ? (
-                          <Section title="CV tailoring">
+                        <Section
+                          title="CV tailoring"
+                          action={materials?.cvTailoringSuggestions?.length ? (
+                            <button
+                              type="button"
+                              disabled={!!generating}
+                              onClick={() => void generate(["cv"], true)}
+                              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
+                            >
+                              {generating === "cv" ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+                              Retry
+                            </button>
+                          ) : undefined}
+                        >
+                          {materials?.cvTailoringSuggestions?.length ? (
                             <ul className="list-disc space-y-1 pl-4 text-sm">
                               {materials.cvTailoringSuggestions.map((s) => (
                                 <li key={s}>{s}</li>
                               ))}
                             </ul>
-                          </Section>
-                        ) : null}
+                          ) : null}
+                        </Section>
 
                         {/* Generate all at once if nothing exists */}
                         {!materials && (

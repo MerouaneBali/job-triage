@@ -1,7 +1,7 @@
 import { GENERATE_TOOL, generateSchema } from "./schemas.mjs";
 import { hashText } from "./cache.mjs";
 
-export const GENERATE_PROMPT_VERSION = "generate-v4";
+export const GENERATE_PROMPT_VERSION = "generate-v5";
 
 function buildSystem(what) {
   const skip = [];
@@ -41,18 +41,24 @@ How to open (this is the hardest part -- get it right):
 - Do NOT rephrase or summarize the job description back at them. That is the most robotic thing you can do. If the job says "frontend depth and written reasoning", do not write "the mix of frontend depth and written reasoning stands out". Pick ONE real detail and react to it naturally.
 - Do not start with complimenting the company in a vague way. No "I am impressed by what you are building at X."
 
-How to state fit (second and third sentences):
-- One clear sentence: "I have been doing [very similar thing] for [type of company/product]." Not a list of technologies. Not "My stack is X, Y and Z used on A, B and C."
-- If you mention technologies, fold them into a clause, not a list. "building e-commerce platforms in React and Next.js" not "React, Next.js, TypeScript, used on a white-label telecom platform, a Shopify subscription storefront and a React Native delivery app."
+How to state fit -- THIS IS THE MOST IMPORTANT RULE:
+- The fit sentence MUST follow directly from the hook. If you said "the code review simulation caught my eye", the next sentence must say why you would be good at that kind of work -- not pivot to an unrelated fact from the profile.
+- Think of the outreach as a single connected thought, not three separate buckets to fill with profile information.
+- One clear sentence that connects to what you just said. For example: if the hook is about code review, say something like "I have been doing frontend contract work for a few years and code review is a big part of what I do." If the hook is about a specific product type, say you have built something similar.
+- Do NOT jump to unrelated profile facts. If the hook is about code review and you then write "Most of my recent work is Next.js and React for a Spain-based telecom company including a customer portal that replaced a Flutter web build" -- that is exactly wrong. That Flutter portal has nothing to do with code review and nothing to do with what you just said.
+- If you mention technologies, fold them into a clause, not a list. "building e-commerce platforms in React and Next.js" not "React, Next.js, TypeScript, used on three different platforms."
 - One concrete detail that shows real experience, not just tool familiarity.
 
 Remote and location:
 - If the job has a location restriction but is remote: one casual sentence, then move on. Keep it brief and natural. Example: "Five years working remotely for UK and Spain-based companies, all compliance on my side." Do not ask if they are open to international candidates.
+- Only include this if location is actually a potential concern for this job. Do not force it in if it is not relevant.
 
-Bad outreach (do not write anything like this):
+Bad outreach examples (do not write anything like these):
+- Hook about code review, then: "Most of my recent work is Next.js and React for a Spain-based telecom company, including a customer portal that replaced a Flutter web build." -- the Flutter migration has nothing to do with code review. This is the pivot-to-random-facts failure.
 - "The mix of frontend depth and written reasoning in this role stands out, especially the focus on explaining architectural choices." -- this is the job posting rephrased back at them
 - "My day-to-day stack is React, Next.js and TypeScript, used on a white-label telecom platform, a Shopify subscription storefront and a React Native delivery app." -- this is a resume dump, not a sentence
 - "I am reaching out to express my interest in the [X] role at [Y]." -- template filler
+- Sentences that are just facts with no connection to what came before: "Long-term remote contracts with UK and Spain-based companies, all tax and compliance handled on my side." dropped in mid-message with no setup is confusing and cold.
 
 Cover letter rules:
 - Slightly more formal than outreach but still human. Not stiff.

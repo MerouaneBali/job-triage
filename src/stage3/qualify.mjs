@@ -68,12 +68,20 @@ export function qualifyJob(job, prefs = {}) {
     reasons.push("security_clearance_required");
   }
 
+  // Location-based checks: only hard-fail when the job is NOT remote.
+  // If a job is remote but has geographic preferences (e.g. "EU only"), that is
+  // a signal the candidate handles in outreach -- not a disqualifier.
   if (usOnly && !international && !remoteInText) {
     reasons.push("us_local_authorization_required");
+  } else if (usOnly && remoteInText && !international) {
+    // Remote but US-preferred -- flag as a soft warning in signals, not a fail
+    signals.locationRiskRemote = true;
   }
 
-  if (ukRtw && !international && !/\b(remote|contractor|freelance)\b/i.test(text)) {
+  if (ukRtw && !international && !remoteInText) {
     reasons.push("uk_right_to_work_emphasized");
+  } else if (ukRtw && remoteInText && !international) {
+    signals.locationRiskRemote = true;
   }
 
   // Hybrid/on-site in UK/US city without remote/international → fail

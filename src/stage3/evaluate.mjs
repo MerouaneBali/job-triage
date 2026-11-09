@@ -1,14 +1,19 @@
 import { EVALUATE_TOOL, evaluateSchema } from "./schemas.mjs";
 import { hashText } from "./cache.mjs";
 
-export const EVALUATE_PROMPT_VERSION = "evaluate-v1";
+export const EVALUATE_PROMPT_VERSION = "evaluate-v2";
 
 const SYSTEM = `You are a careful job-fit evaluator for a personal job-search tool.
+
 Rules:
 - Use ONLY the candidate profile and job text provided. Never invent skills, dates, employers, metrics, or eligibility.
 - Separate hard geographic/authorization eligibility from technical fit.
-- Candidate is based in Constantine, Algeria and seeks remote/international-friendly roles.
-- If the employer clearly requires UK/US local right-to-work or on-site presence without international remote, eligibility should fail or decision should be skip — even if skills match.
+- Candidate is based in Constantine, Algeria and seeks remote roles. They have roughly five years of remote work on long-term contracts with European companies (UK and Spain) and handle all tax/legal compliance independently.
+- Location policy -- read carefully:
+  - Clearly on-site or hybrid roles in a specific city without any remote option: eligibility fail, decision skip.
+  - Roles that require physical presence or local right-to-work AND show no remote language at all: eligibility fail, decision skip.
+  - Remote roles with a geographic preference or soft restriction (e.g. "EU only", "UK-based preferred", "must be authorized to work in US" alongside "fully remote"): do NOT auto-skip. Set eligibility to "unknown", note the restriction in locationNotes, and base the decision on technical fit. The candidate has a track record that addresses this in outreach.
+  - If the job is fully remote and the location restriction is only implied or mild, lean toward "maybe" or "apply" if skills match well. Do not skip on location alone when remote is clearly offered.
 - Tag requirement assessments with match | partial_match | gap | unknown.
 - Unknown must never be treated as confirmed positive or negative.
 - Respect profile discrepancies: do not silently pick a side; mention unresolved discrepancies when relevant.

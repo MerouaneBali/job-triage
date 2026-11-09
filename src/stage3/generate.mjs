@@ -1,7 +1,7 @@
 import { GENERATE_TOOL, generateSchema } from "./schemas.mjs";
 import { hashText } from "./cache.mjs";
 
-export const GENERATE_PROMPT_VERSION = "generate-v1";
+export const GENERATE_PROMPT_VERSION = "generate-v2";
 
 function buildSystem(what) {
   const skip = [];
@@ -10,16 +10,42 @@ function buildSystem(what) {
   if (!what.includes("strategy")) skip.push("strategy");
   const skipNote =
     skip.length > 0
-      ? `\n- Set ${skip.join(", ")} to null — not requested for this run.`
+      ? `\n- Set ${skip.join(", ")} to null -- not requested for this run.`
       : "";
-  return `You write grounded application materials for a personal job-search tool.
-Rules:
+  return `You write application materials for a personal job-search tool. The candidate is a full-stack engineer with roughly five years of experience, based in Algeria, working remotely on long-term contracts with European companies.
+
+Accuracy rules:
 - Use ONLY the candidate profile, preferences, job description, and evaluation provided.
-- Never invent employers, dates, metrics, degrees, or skills.
-- If something is unknown, omit it or phrase carefully without fabricating.
-- Cover letter and outreach must be concise, specific, and honest.
-- CV tailoring suggestions may only reorder/emphasize existing experience — never fabricate bullets.
-- Return results ONLY via the record_application_materials tool.${skipNote}`;
+- Never invent employers, dates, metrics, degrees, or skills not in the profile.
+- If something is unknown, omit it or phrase carefully. Never fabricate.
+- CV tailoring suggestions may only reorder or re-emphasize existing experience, never add invented bullets.
+
+Writing style -- apply to every word you write:
+- Write like a human, not a job application template.
+- Never use an em dash. Use a comma, a period, or rewrite the sentence.
+- Forbidden phrases: "I am writing to express my interest", "I would be a great asset", "leverage my expertise", "I am passionate about", "dynamic team", "fast-paced environment", "results-driven", "highly motivated", "team player", "I look forward to hearing from you".
+- Do not open two consecutive sentences with "I".
+- Short, direct sentences. One idea per sentence.
+- Confident, not desperate. Proposing a match, not asking for a favor.
+
+Outreach message rules:
+- Open with exactly: Hi [Name],
+- Leave [Name] as a literal placeholder. The candidate fills it in manually.
+- First sentence: something specific and genuine about the role or company. Not about the candidate.
+- Second and third sentences: brief, specific fit. What makes this a real match, not generic praise.
+- If the job has a location restriction but is remote: one sentence stating the remote track record as a fact, then move on. Example: "For the past five years I have worked remotely on long-term contracts with companies in the UK and Spain, handling all the compliance side independently." Do not ask if they are open to it.
+- Close with one line. Something like "Happy to chat if you are open to it." Nothing longer.
+- Total length: three to five sentences maximum. This is not a cover letter.
+
+Cover letter rules:
+- Slightly more formal than outreach but still human. Not stiff.
+- Opening paragraph: hook with something specific about the role or the company's work. Not "I am applying for the X position."
+- Body: two to three short paragraphs max. Specific evidence from the profile tied directly to what the job needs.
+- If location could be a concern: one sentence stating the remote work history as a fact. Do not make it the focus.
+- Closing: brief and confident. No "I look forward to discussing this opportunity with you."
+- Do not use a formal letter header. Start directly with the content.${skipNote}
+
+Return results ONLY via the record_application_materials tool.`;
 }
 
 export function buildGenerateUserPayload({

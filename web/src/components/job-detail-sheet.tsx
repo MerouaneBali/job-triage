@@ -25,8 +25,30 @@ import {
 import { TRACK_STATUS_META } from "@/components/track-status-badge";
 import type { ApplyChannel, ChatMessage, Decision, JobRow, TrackStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { Loader2, RefreshCw, Sparkles, Trash2, UserRound } from "lucide-react";
+import { Check, Copy, Loader2, RefreshCw, Sparkles, Trash2, UserRound, X } from "lucide-react";
 import { toast } from "sonner";
+
+// ─── Copy button ─────────────────────────────────────────────────────────────
+
+function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
+  const [copied, setCopied] = React.useState(false);
+  function handleCopy() {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+    >
+      {copied ? <Check className="size-3 text-emerald-600" /> : <Copy className="size-3" />}
+      {copied ? "Copied" : label}
+    </button>
+  );
+}
 
 const DECISION_OPTIONS: { value: Decision | "none"; label: string; className: string }[] = [
   { value: "apply",  label: "✅ Apply",  className: "text-emerald-700 bg-emerald-50 border-emerald-300 dark:text-emerald-400 dark:bg-emerald-950/30 dark:border-emerald-700" },
@@ -206,14 +228,14 @@ function JobChatPanel({ job }: { job: JobRow }) {
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Messages */}
-      <div className="min-h-[180px] max-h-[55vh] overflow-y-auto rounded-md border bg-muted/20 p-3 space-y-3">
+      {/* Messages — no container box, just flowing content */}
+      <div className="min-h-[180px] max-h-[55vh] overflow-y-auto space-y-3">
         {loadingHistory ? (
           <div className="flex justify-center py-8">
             <Loader2 className="size-4 animate-spin text-muted-foreground" />
           </div>
         ) : messages.length === 0 && !streaming ? (
-          <p className="text-center text-xs text-muted-foreground py-8 px-4 leading-relaxed">
+          <p className="text-center text-xs text-muted-foreground py-8 px-2 leading-relaxed">
             Ask anything about this job. Claude has the full context — description, evaluation, your profile, and all materials.
           </p>
         ) : null}
@@ -221,24 +243,34 @@ function JobChatPanel({ job }: { job: JobRow }) {
         {messages.map((msg) => (
           <div
             key={msg.id}
-            className={cn("flex", msg.role === "user" ? "justify-end" : "justify-start")}
+            className={cn("group flex items-end gap-1.5", msg.role === "user" ? "justify-end" : "justify-start")}
           >
+            {msg.role === "assistant" && (
+              <span className="mb-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <CopyButton text={msg.content} label="" />
+              </span>
+            )}
             <div
               className={cn(
-                "max-w-[85%] rounded-xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap",
+                "max-w-[90%] rounded-xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap",
                 msg.role === "user"
                   ? "bg-primary text-primary-foreground"
-                  : "border bg-background"
+                  : "border bg-muted/40"
               )}
             >
               {msg.content}
             </div>
+            {msg.role === "user" && (
+              <span className="mb-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <CopyButton text={msg.content} label="" />
+              </span>
+            )}
           </div>
         ))}
 
         {streaming && (
           <div className="flex justify-start">
-            <div className="max-w-[85%] rounded-xl border bg-background px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap">
+            <div className="max-w-[90%] rounded-xl border bg-muted/40 px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap">
               {streamingText ? (
                 <>
                   {streamingText}
@@ -253,6 +285,8 @@ function JobChatPanel({ job }: { job: JobRow }) {
 
         <div ref={messagesEndRef} />
       </div>
+
+      <Separator />
 
       {/* Input row */}
       <div className="flex gap-2">
@@ -287,9 +321,10 @@ function JobChatPanel({ job }: { job: JobRow }) {
             <button
               type="button"
               onClick={() => void handleClear()}
-              className="text-center text-[10px] text-muted-foreground hover:text-destructive"
+              title="Clear conversation"
+              className="flex items-center justify-center rounded p-1 text-muted-foreground hover:text-destructive"
             >
-              Clear
+              <X className="size-3.5" />
             </button>
           ) : null}
         </div>
@@ -327,6 +362,12 @@ export function JobDetailSheet({
   // Sync local materials when job changes
   React.useEffect(() => {
     setLocalMaterials(null);
+  }, [job?.id]);
+
+  // Reset evaluating flags when switching jobs so spinner doesn't bleed onto other jobs
+  React.useEffect(() => {
+    setEvaluating(false);
+    setPendingRefresh(false);
   }, [job?.id]);
 
   const evaln = job?.evaluation;
@@ -778,15 +819,18 @@ export function JobDetailSheet({
                         <Section
                           title="Cover letter"
                           action={materials?.coverLetter ? (
-                            <button
-                              type="button"
-                              disabled={!!generating}
-                              onClick={() => void generate(["coverLetter"], true)}
-                              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
-                            >
-                              {generating === "coverLetter" ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
-                              Retry
-                            </button>
+                            <span className="flex items-center gap-2">
+                              <CopyButton text={materials.coverLetter} />
+                              <button
+                                type="button"
+                                disabled={!!generating}
+                                onClick={() => void generate(["coverLetter"], true)}
+                                className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
+                              >
+                                {generating === "coverLetter" ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+                                Retry
+                              </button>
+                            </span>
                           ) : undefined}
                         >
                           {materials?.coverLetter ? (
@@ -811,15 +855,18 @@ export function JobDetailSheet({
                         <Section
                           title="Outreach message"
                           action={materials?.outreachMessage ? (
-                            <button
-                              type="button"
-                              disabled={!!generating}
-                              onClick={() => void generate(["outreach"], true)}
-                              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
-                            >
-                              {generating === "outreach" ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
-                              Retry
-                            </button>
+                            <span className="flex items-center gap-2">
+                              <CopyButton text={materials.outreachMessage} />
+                              <button
+                                type="button"
+                                disabled={!!generating}
+                                onClick={() => void generate(["outreach"], true)}
+                                className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
+                              >
+                                {generating === "outreach" ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+                                Retry
+                              </button>
+                            </span>
                           ) : undefined}
                         >
                           {materials?.outreachMessage ? (
@@ -844,15 +891,18 @@ export function JobDetailSheet({
                         <Section
                           title="Strategy"
                           action={materials?.strategy ? (
-                            <button
-                              type="button"
-                              disabled={!!generating}
-                              onClick={() => void generate(["strategy"], true)}
-                              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
-                            >
-                              {generating === "strategy" ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
-                              Retry
-                            </button>
+                            <span className="flex items-center gap-2">
+                              <CopyButton text={materials.strategy} />
+                              <button
+                                type="button"
+                                disabled={!!generating}
+                                onClick={() => void generate(["strategy"], true)}
+                                className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
+                              >
+                                {generating === "strategy" ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+                                Retry
+                              </button>
+                            </span>
                           ) : undefined}
                         >
                           {materials?.strategy ? (
@@ -877,15 +927,18 @@ export function JobDetailSheet({
                         <Section
                           title="Questions to ask"
                           action={materials?.questionsToAsk?.length ? (
-                            <button
-                              type="button"
-                              disabled={!!generating}
-                              onClick={() => void generate(["questions"], true)}
-                              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
-                            >
-                              {generating?.includes("questions") ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
-                              Retry
-                            </button>
+                            <span className="flex items-center gap-2">
+                              <CopyButton text={materials.questionsToAsk.map((q, i) => `${i + 1}. ${q}`).join("\n")} label="Copy all" />
+                              <button
+                                type="button"
+                                disabled={!!generating}
+                                onClick={() => void generate(["questions"], true)}
+                                className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
+                              >
+                                {generating?.includes("questions") ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+                                Retry
+                              </button>
+                            </span>
                           ) : undefined}
                         >
                           {materials?.questionsToAsk?.length ? (
@@ -912,15 +965,18 @@ export function JobDetailSheet({
                         <Section
                           title="CV tailoring"
                           action={materials?.cvTailoringSuggestions?.length ? (
-                            <button
-                              type="button"
-                              disabled={!!generating}
-                              onClick={() => void generate(["cv"], true)}
-                              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
-                            >
-                              {generating === "cv" ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
-                              Retry
-                            </button>
+                            <span className="flex items-center gap-2">
+                              <CopyButton text={materials.cvTailoringSuggestions.map((s, i) => `${i + 1}. ${s}`).join("\n")} label="Copy all" />
+                              <button
+                                type="button"
+                                disabled={!!generating}
+                                onClick={() => void generate(["cv"], true)}
+                                className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
+                              >
+                                {generating === "cv" ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+                                Retry
+                              </button>
+                            </span>
                           ) : undefined}
                         >
                           {materials?.cvTailoringSuggestions?.length ? (

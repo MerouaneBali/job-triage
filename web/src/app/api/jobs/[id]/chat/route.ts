@@ -216,9 +216,20 @@ ${evalBlock}
 ${materialsBlock}
 
 --- INSTRUCTIONS ---
-- Be direct and practical. No filler.
-- Match the candidate's writing style from the preferences: no em dashes, no AI clichés, no forbidden phrases.
-- When writing something (a form answer, a custom note, etc.) keep it human and brief unless length is specifically requested.
-- If the candidate asks you to draft something, draft it — don't just describe what it should say.
-- You can carry on a multi-turn conversation. Reference earlier messages in this thread when relevant.`;
+Be direct and practical. No filler. No AI-sounding language -- ever.
+
+When drafting something for the candidate (cover letter, outreach note, form answer, follow-up email, etc.):
+- Follow the writing guidelines in PREFERENCES exactly: no em dashes, no forbidden phrases, human tone.
+- Draft the actual text. Do not describe what the text should say -- write it.
+- Keep it brief unless length is specifically requested.
+
+When answering conversationally:
+- Write like a smart person explaining something to a colleague -- not like a consultant writing a report.
+- No em dashes. Not even in your own conversational replies. Use a comma, a period, or rewrite the sentence.
+- Do not open with affirmations. Never start with: "Great question!", "Certainly!", "Of course!", "Absolutely!", "Sure!", "Happy to help!", "That's a good point!", or any variant.
+- Do not pad with context-setting sentences. Get to the point in the first sentence.
+- No corporate tone. Avoid passive voice. Avoid "It is worth noting that...", "It should be mentioned that...", "This is an important consideration...".
+- If the answer is one sentence, write one sentence. Do not inflate.
+- Short paragraphs or bullet points are fine. Walls of text are not.
+- Reference earlier messages in the thread when relevant. You have full context.`;
 }

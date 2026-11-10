@@ -110,6 +110,32 @@ const ELIGIBILITY_STYLES = {
   unknown: "border-zinc-400/40 bg-zinc-500/10 text-zinc-800",
 } as const;
 
+// Copy button that floats above-right of an assistant bubble (has its own copied state)
+function AssistantCopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = React.useState(false);
+  function handleCopy() {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      title="Copy"
+      className={cn(
+        "absolute -top-2.5 right-0 flex items-center gap-0.5 rounded-full border bg-background px-1.5 py-0.5 text-[10px] shadow-sm transition-opacity",
+        "opacity-0 group-hover:opacity-100",
+        copied ? "text-emerald-600" : "text-muted-foreground hover:text-foreground"
+      )}
+    >
+      {copied ? <Check className="size-2.5" /> : <Copy className="size-2.5" />}
+      {copied ? "Copied" : "Copy"}
+    </button>
+  );
+}
+
 // ─── Job Chat Panel ──────────────────────────────────────────────────────────
 
 function JobChatPanel({ job }: { job: JobRow }) {
@@ -228,49 +254,68 @@ function JobChatPanel({ job }: { job: JobRow }) {
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Messages — no container box, just flowing content */}
-      <div className="min-h-[180px] max-h-[55vh] overflow-y-auto space-y-3">
+
+      {/* Clear chat — top right, well away from Send */}
+      {messages.length > 0 && !streaming ? (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => void handleClear()}
+            className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-destructive"
+          >
+            <X className="size-3" />
+            Clear chat
+          </button>
+        </div>
+      ) : null}
+
+      {/* Messages — flow naturally, outer ScrollArea handles scrolling */}
+      <div className="space-y-2">
         {loadingHistory ? (
           <div className="flex justify-center py-8">
             <Loader2 className="size-4 animate-spin text-muted-foreground" />
           </div>
         ) : messages.length === 0 && !streaming ? (
-          <p className="text-center text-xs text-muted-foreground py-8 px-2 leading-relaxed">
+          <p className="text-center text-xs text-muted-foreground py-8 leading-relaxed">
             Ask anything about this job. Claude has the full context — description, evaluation, your profile, and all materials.
           </p>
         ) : null}
 
-        {messages.map((msg) => (
-          <div
-            key={msg.id}
-            className={cn("group flex items-end gap-1.5", msg.role === "user" ? "justify-end" : "justify-start")}
-          >
-            {msg.role === "assistant" && (
-              <span className="mb-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <CopyButton text={msg.content} label="" />
-              </span>
-            )}
+        {messages.map((msg) => {
+          const isUser = msg.role === "user";
+          return (
             <div
-              className={cn(
-                "max-w-[90%] rounded-xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap",
-                msg.role === "user"
-                  ? "bg-primary text-primary-foreground"
-                  : "border bg-muted/40"
-              )}
+              key={msg.id}
+              className={cn("flex flex-col gap-0.5", isUser ? "items-end" : "items-start")}
             >
-              {msg.content}
-            </div>
-            {msg.role === "user" && (
-              <span className="mb-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <CopyButton text={msg.content} label="" />
+              <span className="px-1 text-[10px] text-muted-foreground">
+                {isUser ? "You" : "AI"}
               </span>
-            )}
-          </div>
-        ))}
+              {/* group on the bubble wrapper so copy button can react to hover */}
+              <div className="group relative">
+                <div
+                  className={cn(
+                    "max-w-[88vw] rounded-2xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap sm:max-w-xs",
+                    isUser
+                      ? "rounded-tr-sm bg-primary text-primary-foreground"
+                      : "rounded-tl-sm border bg-muted/50"
+                  )}
+                >
+                  {msg.content}
+                </div>
+                {/* Copy button — floats above-right of the bubble, hover-only */}
+                {!isUser && (
+                  <AssistantCopyButton text={msg.content} />
+                )}
+              </div>
+            </div>
+          );
+        })}
 
         {streaming && (
-          <div className="flex justify-start">
-            <div className="max-w-[90%] rounded-xl border bg-muted/40 px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap">
+          <div className="flex flex-col items-start gap-0.5">
+            <span className="px-1 text-[10px] text-muted-foreground">AI</span>
+            <div className="max-w-[88vw] rounded-2xl rounded-tl-sm border bg-muted/50 px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap sm:max-w-xs">
               {streamingText ? (
                 <>
                   {streamingText}
@@ -308,26 +353,14 @@ function JobChatPanel({ job }: { job: JobRow }) {
           disabled={!canChat || streaming}
           className="flex-1 resize-none rounded-lg border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
         />
-        <div className="flex flex-col gap-1">
-          <Button
-            size="sm"
-            onClick={() => void handleSend()}
-            disabled={!input.trim() || !canChat || streaming}
-            className="h-auto flex-1 px-4"
-          >
-            {streaming ? <Loader2 className="size-3.5 animate-spin" /> : "Send"}
-          </Button>
-          {messages.length > 0 && !streaming ? (
-            <button
-              type="button"
-              onClick={() => void handleClear()}
-              title="Clear conversation"
-              className="flex items-center justify-center rounded p-1 text-muted-foreground hover:text-destructive"
-            >
-              <X className="size-3.5" />
-            </button>
-          ) : null}
-        </div>
+        <Button
+          size="sm"
+          onClick={() => void handleSend()}
+          disabled={!input.trim() || !canChat || streaming}
+          className="h-auto self-stretch px-4"
+        >
+          {streaming ? <Loader2 className="size-3.5 animate-spin" /> : "Send"}
+        </Button>
       </div>
     </div>
   );

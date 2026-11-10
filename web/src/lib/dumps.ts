@@ -3,7 +3,7 @@ import { basename, join } from "node:path";
 import { jobFingerprint } from "@/lib/job-fingerprint";
 import Database from "better-sqlite3";
 import { dataPaths } from "./paths";
-import type { Decision, DumpDetail, DumpSummary, HtmlDump, JobRow } from "./types";
+import type { ChatMessage, Decision, DumpDetail, DumpSummary, HtmlDump, JobRow } from "./types";
 
 function ensureJobsTrackColumns(db: Database.Database) {
   const cols = new Set(
@@ -488,6 +488,91 @@ export function mergeDump(stage1Name: string): DumpDetail {
         (j) => j.decision === "apply" || j.decision === "maybe"
       ).length,
     };
+  } finally {
+    db.close();
+  }
+}
+
+// ─── Job chat helpers ────────────────────────────────────────────────────────
+
+function ensureJobChatTable(db: Database.Database) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS job_chat (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      dump_name TEXT NOT NULL,
+      job_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_job_chat ON job_chat(dump_name, job_id, created_at);
+  `);
+}
+
+export function getJobChatMessages(dumpName: string, jobId: string): ChatMessage[] {
+  const db = openAppDb();
+  try {
+    ensureJobChatTable(db);
+    return db
+      .prepare(
+        `SELECT id, role, content, created_at FROM job_chat
+         WHERE dump_name = ? AND job_id = ?
+         ORDER BY created_at ASC, id ASC`
+      )
+      .all(dumpName, String(jobId)) as ChatMessage[];
+  } finally {
+    db.close();
+  }
+}
+
+export function appendChatMessage(
+  dumpName: string,
+  jobId: string,
+  role: "user" | "assistant",
+  content: string
+): void {
+  const db = openAppDb();
+  try {
+    ensureJobChatTable(db);
+    db.prepare(
+      `INSERT INTO job_chat (dump_name, job_id, role, content) VALUES (?, ?, ?, ?)`
+    ).run(dumpName, String(jobId), role, content);
+  } finally {
+    db.close();
+  }
+}
+
+export function clearJobChat(dumpName: string, jobId: string): void {
+  const db = openAppDb();
+  try {
+    ensureJobChatTable(db);
+    db.prepare(`DELETE FROM job_chat WHERE dump_name = ? AND job_id = ?`).run(
+      dumpName,
+      String(jobId)
+    );
+  } finally {
+    db.close();
+  }
+}
+
+/** Returns the raw job row (with description + evaluation + materials) for the chat system prompt. */
+export function getJobRowForChat(
+  dumpName: string,
+  jobId: string
+): JobRow | null {
+  const stem = safeBasename(dumpName);
+  if (!stem) return null;
+  const db = openAppDb();
+  try {
+    const dump = db
+      .prepare(`SELECT id FROM dumps WHERE basename = ?`)
+      .get(stem) as { id: number } | undefined;
+    if (!dump) return null;
+    const row = db
+      .prepare(`SELECT * FROM jobs WHERE dump_id = ? AND job_id = ?`)
+      .get(dump.id, String(jobId)) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return { ...rowToJob(row), dumpName };
   } finally {
     db.close();
   }

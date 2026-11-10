@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.7.0",
     "@base-ui/react": "^1.9.0",
     "@tailwindcss/postcss": "^4.3.4",
     "better-sqlite3": "^13.0.3",

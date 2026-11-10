@@ -23,7 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { TRACK_STATUS_META } from "@/components/track-status-badge";
-import type { ApplyChannel, Decision, JobRow, TrackStatus } from "@/lib/types";
+import type { ApplyChannel, ChatMessage, Decision, JobRow, TrackStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Loader2, RefreshCw, Sparkles, Trash2, UserRound } from "lucide-react";
 import { toast } from "sonner";
@@ -87,6 +87,216 @@ const ELIGIBILITY_STYLES = {
   fail: "border-rose-500/40 bg-rose-500/15 text-rose-900",
   unknown: "border-zinc-400/40 bg-zinc-500/10 text-zinc-800",
 } as const;
+
+// ─── Job Chat Panel ──────────────────────────────────────────────────────────
+
+function JobChatPanel({ job }: { job: JobRow }) {
+  const [messages, setMessages] = React.useState<ChatMessage[]>([]);
+  const [input, setInput] = React.useState("");
+  const [loadingHistory, setLoadingHistory] = React.useState(false);
+  const [streaming, setStreaming] = React.useState(false);
+  const [streamingText, setStreamingText] = React.useState("");
+  const messagesEndRef = React.useRef<HTMLDivElement>(null);
+
+  // Load history when job changes
+  React.useEffect(() => {
+    if (!job?.id || !job.dumpName) return;
+    setMessages([]);
+    setLoadingHistory(true);
+    fetch(
+      `/api/jobs/${encodeURIComponent(String(job.id))}/chat?dumpName=${encodeURIComponent(job.dumpName)}`
+    )
+      .then((r) => r.json())
+      .then((data: { messages?: ChatMessage[] }) => setMessages(data.messages ?? []))
+      .catch(() => undefined)
+      .finally(() => setLoadingHistory(false));
+  }, [job?.id, job?.dumpName]);
+
+  // Auto-scroll to bottom on new content
+  React.useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, streamingText]);
+
+  async function handleSend() {
+    if (!input.trim() || streaming || !job?.dumpName) return;
+    const text = input.trim();
+    setInput("");
+
+    // Optimistically add user message
+    setMessages((prev) => [
+      ...prev,
+      { id: Date.now(), role: "user", content: text, created_at: new Date().toISOString() },
+    ]);
+    setStreaming(true);
+    setStreamingText("");
+
+    try {
+      const res = await fetch(
+        `/api/jobs/${encodeURIComponent(String(job.id))}/chat`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dumpName: job.dumpName, message: text }),
+        }
+      );
+
+      if (!res.ok || !res.body) {
+        const data = (await res.json()) as { error?: string };
+        throw new Error(data.error ?? `HTTP ${res.status}`);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let assistantText = "";
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const payload = line.slice(6).trim();
+          if (payload === "[DONE]") break;
+          try {
+            const json = JSON.parse(payload) as { text?: string; error?: string };
+            if (json.error) throw new Error(json.error);
+            if (json.text) {
+              assistantText += json.text;
+              setStreamingText(assistantText);
+            }
+          } catch {
+            /* ignore parse errors for partial chunks */
+          }
+        }
+      }
+
+      if (assistantText) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now() + 1,
+            role: "assistant",
+            content: assistantText,
+            created_at: new Date().toISOString(),
+          },
+        ]);
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Chat failed");
+    } finally {
+      setStreaming(false);
+      setStreamingText("");
+    }
+  }
+
+  async function handleClear() {
+    if (!job?.dumpName || streaming) return;
+    await fetch(
+      `/api/jobs/${encodeURIComponent(String(job.id))}/chat?dumpName=${encodeURIComponent(job.dumpName)}`,
+      { method: "DELETE" }
+    );
+    setMessages([]);
+  }
+
+  const canChat = !!job?.dumpName;
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* Messages */}
+      <div className="min-h-[180px] max-h-[55vh] overflow-y-auto rounded-md border bg-muted/20 p-3 space-y-3">
+        {loadingHistory ? (
+          <div className="flex justify-center py-8">
+            <Loader2 className="size-4 animate-spin text-muted-foreground" />
+          </div>
+        ) : messages.length === 0 && !streaming ? (
+          <p className="text-center text-xs text-muted-foreground py-8 px-4 leading-relaxed">
+            Ask anything about this job. Claude has the full context — description, evaluation, your profile, and all materials.
+          </p>
+        ) : null}
+
+        {messages.map((msg) => (
+          <div
+            key={msg.id}
+            className={cn("flex", msg.role === "user" ? "justify-end" : "justify-start")}
+          >
+            <div
+              className={cn(
+                "max-w-[85%] rounded-xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap",
+                msg.role === "user"
+                  ? "bg-primary text-primary-foreground"
+                  : "border bg-background"
+              )}
+            >
+              {msg.content}
+            </div>
+          </div>
+        ))}
+
+        {streaming && (
+          <div className="flex justify-start">
+            <div className="max-w-[85%] rounded-xl border bg-background px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap">
+              {streamingText ? (
+                <>
+                  {streamingText}
+                  <span className="ml-0.5 inline-block h-3.5 w-0.5 animate-pulse bg-current opacity-60" />
+                </>
+              ) : (
+                <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+              )}
+            </div>
+          </div>
+        )}
+
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input row */}
+      <div className="flex gap-2">
+        <textarea
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              void handleSend();
+            }
+          }}
+          placeholder={
+            canChat
+              ? "Ask a question… (Enter to send, Shift+Enter for new line)"
+              : "Open a saved job to chat"
+          }
+          rows={2}
+          disabled={!canChat || streaming}
+          className="flex-1 resize-none rounded-lg border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+        />
+        <div className="flex flex-col gap-1">
+          <Button
+            size="sm"
+            onClick={() => void handleSend()}
+            disabled={!input.trim() || !canChat || streaming}
+            className="h-auto flex-1 px-4"
+          >
+            {streaming ? <Loader2 className="size-3.5 animate-spin" /> : "Send"}
+          </Button>
+          {messages.length > 0 && !streaming ? (
+            <button
+              type="button"
+              onClick={() => void handleClear()}
+              className="text-center text-[10px] text-muted-foreground hover:text-destructive"
+            >
+              Clear
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function JobDetailSheet({
   job,
@@ -467,6 +677,9 @@ export function JobDetailSheet({
                     <TabsTrigger value="job" className="flex-1">
                       Job
                     </TabsTrigger>
+                    <TabsTrigger value="chat" className="flex-1">
+                      Chat
+                    </TabsTrigger>
                   </TabsList>
 
                   <TabsContent value="evaluation" className="mt-4 space-y-5">
@@ -770,6 +983,10 @@ export function JobDetailSheet({
                         </p>
                       )}
                     </Section>
+                  </TabsContent>
+
+                  <TabsContent value="chat" className="mt-4">
+                    <JobChatPanel job={job} />
                   </TabsContent>
                 </Tabs>
               </div>

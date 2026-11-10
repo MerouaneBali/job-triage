@@ -148,6 +148,13 @@ export type PipelineJob = {
 /** Exit code used when the user stops a pipeline job. */
 export const PIPELINE_STOPPED_EXIT = 130;
 
+export type ChatMessage = {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+};
+
 export type PipelineEvent =
   | { type: "log"; line: string; stream: "stdout" | "stderr" }
   | { type: "phase"; phase: string }

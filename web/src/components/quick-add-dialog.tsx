@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Plus, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { withBasePath } from "@/lib/utils";
 
 interface Props {
   /** Called when the fetch pipeline has started (not necessarily completed). */
@@ -32,7 +33,7 @@ export function QuickAddDialog({ onStarted }: Props) {
     if (!trimmed) return;
     setLoading(true);
     try {
-      const res = await fetch("/api/jobs/quick-add", {
+      const res = await fetch(withBasePath("/api/jobs/quick-add"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: trimmed, stage3: false }),

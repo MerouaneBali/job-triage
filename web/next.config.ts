@@ -8,7 +8,16 @@ if (existsSync(repoEnv)) {
   loadDotenv({ path: repoEnv, quiet: true });
 }
 
+/** Mount under Tailscale Serve `/job-triage` (and direct :4173/job-triage). */
+const basePath = process.env.NEXT_BASE_PATH ?? "/job-triage";
+
 const nextConfig: NextConfig = {
+  basePath,
+  // Inlined for client fetch / EventSource / SW registration (Next does not
+  // auto-prefix raw fetch("/api/...") calls).
+  env: {
+    NEXT_PUBLIC_BASE_PATH: basePath,
+  },
   serverExternalPackages: ["dotenv", "better-sqlite3"],
   // Phone / Tailscale / LAN hosts hitting `next dev` (HMR + /_next/*).
   // MagicDNS is multi-label (host.tailxxxx.ts.net) → need ** not *.

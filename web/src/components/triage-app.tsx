@@ -39,7 +39,7 @@ import {
   dumpFetchHint,
 } from "@/components/dump-health";
 import { ALL_DUMPS, ALL_DUMPS_ALL, type DumpDetail, type DumpSummary, type JobRow } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { cn, withBasePath } from "@/lib/utils";
 import { Briefcase, Check, Columns3, LayoutDashboard, ListFilter, RefreshCw, SlidersHorizontal, UserRound, Workflow } from "lucide-react";
 import { toast } from "sonner";
 import { Dashboard } from "@/components/dashboard";
@@ -109,7 +109,7 @@ export function TriageApp() {
   const loadDumps = useCallback(async () => {
     setDumpsLoading(true);
     try {
-      const res = await fetch("/api/dumps");
+      const res = await fetch(withBasePath("/api/dumps"));
       if (!res.ok) {
         const err = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(err.error || `Dumps failed (${res.status})`);
@@ -138,7 +138,7 @@ export function TriageApp() {
     try {
       if (name === ALL_DUMPS || name === ALL_DUMPS_ALL) {
         const url = name === ALL_DUMPS ? "/api/inbox" : "/api/inbox/all";
-        const res = await fetch(url);
+        const res = await fetch(withBasePath(url));
         if (!res.ok) {
           const err = (await res.json()) as { error?: string };
           throw new Error(err.error || "Failed to load inbox");
@@ -167,7 +167,9 @@ export function TriageApp() {
         });
         return;
       }
-      const res = await fetch(`/api/dumps/${encodeURIComponent(name)}`);
+      const res = await fetch(
+        withBasePath(`/api/dumps/${encodeURIComponent(name)}`)
+      );
       if (!res.ok) {
         const err = (await res.json()) as { error?: string };
         throw new Error(err.error || "Failed to load dump");

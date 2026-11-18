@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import { RefreshCw, TrendingUp, Briefcase, Inbox, Clock, CheckCircle2, BarChart2, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { cn } from "@/lib/utils";
+import { cn, withBasePath } from "@/lib/utils";
 import type { DashboardData, UsageStat } from "@/app/api/dashboard/route";
 
 // ─── pricing ──────────────────────────────────────────────────────────────────
@@ -235,7 +235,7 @@ export function Dashboard() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/dashboard");
+      const res = await fetch(withBasePath("/api/dashboard"));
       if (!res.ok) {
         const j = (await res.json()) as { error?: string };
         throw new Error(j.error || "Failed to load dashboard");

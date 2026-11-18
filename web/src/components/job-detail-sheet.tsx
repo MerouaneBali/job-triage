@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/select";
 import { TRACK_STATUS_META } from "@/components/track-status-badge";
 import type { ApplyChannel, ChatMessage, Decision, JobRow, TrackStatus } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { cn, withBasePath } from "@/lib/utils";
 import { Check, Copy, Loader2, RefreshCw, Sparkles, Trash2, UserRound, X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -152,7 +152,9 @@ function JobChatPanel({ job }: { job: JobRow }) {
     setMessages([]);
     setLoadingHistory(true);
     fetch(
-      `/api/jobs/${encodeURIComponent(String(job.id))}/chat?dumpName=${encodeURIComponent(job.dumpName)}`
+      withBasePath(
+        `/api/jobs/${encodeURIComponent(String(job.id))}/chat?dumpName=${encodeURIComponent(job.dumpName)}`
+      )
     )
       .then((r) => r.json())
       .then((data: { messages?: ChatMessage[] }) => setMessages(data.messages ?? []))
@@ -180,7 +182,7 @@ function JobChatPanel({ job }: { job: JobRow }) {
 
     try {
       const res = await fetch(
-        `/api/jobs/${encodeURIComponent(String(job.id))}/chat`,
+        withBasePath(`/api/jobs/${encodeURIComponent(String(job.id))}/chat`),
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -244,7 +246,9 @@ function JobChatPanel({ job }: { job: JobRow }) {
   async function handleClear() {
     if (!job?.dumpName || streaming) return;
     await fetch(
-      `/api/jobs/${encodeURIComponent(String(job.id))}/chat?dumpName=${encodeURIComponent(job.dumpName)}`,
+      withBasePath(
+        `/api/jobs/${encodeURIComponent(String(job.id))}/chat?dumpName=${encodeURIComponent(job.dumpName)}`
+      ),
       { method: "DELETE" }
     );
     setMessages([]);
@@ -415,11 +419,14 @@ export function JobDetailSheet({
     if (!job?.id || !job.dumpName || saving) return;
     setSaving(true);
     try {
-      const res = await fetch(`/api/jobs/${encodeURIComponent(String(job.id))}/track`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dumpName: job.dumpName, ...patch }),
-      });
+      const res = await fetch(
+        withBasePath(`/api/jobs/${encodeURIComponent(String(job.id))}/track`),
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dumpName: job.dumpName, ...patch }),
+        }
+      );
       const data = (await res.json()) as { job?: JobRow; error?: string };
       if (!res.ok || !data.job) throw new Error(data.error ?? "Update failed");
       onJobUpdated?.(data.job);
@@ -436,7 +443,9 @@ export function JobDetailSheet({
     setDeleting(true);
     try {
       const res = await fetch(
-        `/api/jobs/${encodeURIComponent(job.id)}?dumpName=${encodeURIComponent(job.dumpName)}`,
+        withBasePath(
+          `/api/jobs/${encodeURIComponent(job.id)}?dumpName=${encodeURIComponent(job.dumpName)}`
+        ),
         { method: "DELETE" }
       );
       if (!res.ok) {
@@ -459,11 +468,14 @@ export function JobDetailSheet({
     const jobId = job.id;
     const dumpName = job.dumpName;
     try {
-      const res = await fetch(`/api/jobs/${encodeURIComponent(String(jobId))}/evaluate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dumpName, force: true }),
-      });
+      const res = await fetch(
+        withBasePath(`/api/jobs/${encodeURIComponent(String(jobId))}/evaluate`),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dumpName, force: true }),
+        }
+      );
       const data = (await res.json()) as { ok?: boolean; pipelineJobId?: string; error?: string };
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
       toast.success("AI evaluation started — the terminal will pop up automatically in a moment.", { duration: 6000 });
@@ -478,7 +490,7 @@ export function JobDetailSheet({
           for (let attempts = 0; attempts < 120; attempts++) {
             await new Promise((r) => setTimeout(r, 3000));
             try {
-              const sr = await fetch("/api/pipeline/active");
+              const sr = await fetch(withBasePath("/api/pipeline/active"));
               if (!sr.ok) break;
               const sdata = (await sr.json()) as { job?: { id: string; status: string } | null };
               // Job finished when it's no longer the active running job
@@ -504,7 +516,7 @@ export function JobDetailSheet({
     if (!job?.id || generating) return;
     setGenerating(what.join(","));
     try {
-      const res = await fetch(`/api/jobs/${job.id}/generate`, {
+      const res = await fetch(withBasePath(`/api/jobs/${job.id}/generate`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dumpBasename: job.dumpName, what, force }),

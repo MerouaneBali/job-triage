@@ -29,7 +29,8 @@ export const metadata: Metadata = {
     telephone: false,
   },
   icons: {
-    apple: "/apple-touch-icon.png",
+    // Metadata does not always auto-prefix public/ icons with basePath.
+    apple: `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/apple-touch-icon.png`,
   },
 };
 

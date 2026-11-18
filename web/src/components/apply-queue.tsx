@@ -22,7 +22,7 @@ import {
   type JobRow,
   type TrackStatus,
 } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { cn, withBasePath } from "@/lib/utils";
 import {
   Briefcase,
   ChevronDown,
@@ -197,7 +197,7 @@ export function ApplyQueue({
     setSavingId(String(job.id));
     try {
       const res = await fetch(
-        `/api/jobs/${encodeURIComponent(String(job.id))}/track`,
+        withBasePath(`/api/jobs/${encodeURIComponent(String(job.id))}/track`),
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },

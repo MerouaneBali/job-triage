@@ -1,5 +1,5 @@
 /* Minimal service worker — makes the app installable; network stays live. */
-const VERSION = "job-triage-v1";
+const VERSION = "job-triage-v2-basepath";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());
@@ -22,8 +22,9 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET") return;
 
   // Never cache API / pipeline streams — always hit the machine.
+  // Path may be `/api/...` or `/job-triage/api/...` depending on mount.
   const url = new URL(request.url);
-  if (url.pathname.startsWith("/api/")) return;
+  if (url.pathname.includes("/api/")) return;
 
   event.respondWith(
     fetch(request).catch(async () => {
@@ -31,7 +32,7 @@ self.addEventListener("fetch", (event) => {
       if (cached) return cached;
       if (request.mode === "navigate") {
         return (
-          (await caches.match("/")) ||
+          (await caches.match(self.registration.scope)) ||
           new Response("Offline — open when the triage host is reachable.", {
             status: 503,
             headers: { "Content-Type": "text/plain" },

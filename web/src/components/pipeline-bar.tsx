@@ -31,7 +31,7 @@ import {
   type PipelineJob,
   type PipelineStopMode,
 } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { cn, withBasePath } from "@/lib/utils";
 import {
   Bot,
   ChevronDown,
@@ -311,7 +311,7 @@ export function PipelineBar({
 
   useEffect(() => {
     void (async () => {
-      const res = await fetch("/api/html-dumps");
+      const res = await fetch(withBasePath("/api/html-dumps"));
       const data = (await res.json()) as { dumps: HtmlDump[] };
       setHtmlDumps(data.dumps || []);
       setHtmlName((prev) => prev || data.dumps?.[0]?.name || "");
@@ -323,7 +323,7 @@ export function PipelineBar({
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch("/api/pipeline/active");
+        const res = await fetch(withBasePath("/api/pipeline/active"));
         if (!res.ok || cancelled) return;
         const data = (await res.json()) as { job: PipelineJob | null };
         if (cancelled || !data.job || data.job.status !== "running") return;
@@ -351,7 +351,7 @@ export function PipelineBar({
     // Fetch the job metadata first so we can populate `job` state correctly.
     void (async () => {
       try {
-        const res = await fetch("/api/pipeline/active");
+        const res = await fetch(withBasePath("/api/pipeline/active"));
         if (!res.ok) return;
         const data = (await res.json()) as { job: PipelineJob | null };
         const pj = data.job;
@@ -394,7 +394,9 @@ export function PipelineBar({
     setStopping(false);
     setLogs([]);
     logsRef.current = [];
-    const es = new EventSource(`/api/pipeline/jobs/${jobId}/stream`);
+    const es = new EventSource(
+      withBasePath(`/api/pipeline/jobs/${jobId}/stream`)
+    );
     esRef.current = es;
     let sawTerminal = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -513,7 +515,7 @@ export function PipelineBar({
     setStopping(true);
     try {
       const res = await fetch(
-        `/api/pipeline/jobs/${encodeURIComponent(id)}/stop`,
+        withBasePath(`/api/pipeline/jobs/${encodeURIComponent(id)}/stop`),
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -538,7 +540,7 @@ export function PipelineBar({
   }
 
   async function refreshHtml() {
-    const res = await fetch("/api/html-dumps");
+    const res = await fetch(withBasePath("/api/html-dumps"));
     const data = (await res.json()) as { dumps: HtmlDump[] };
     setHtmlDumps(data.dumps || []);
   }
@@ -550,7 +552,7 @@ export function PipelineBar({
     opts?: { selectDumpAfter?: string }
   ) {
     try {
-      const res = await fetch(path, {
+      const res = await fetch(withBasePath(path), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -586,7 +588,7 @@ export function PipelineBar({
         const form = new FormData();
         form.set("file", file);
         form.set("parse", "true");
-        const res = await fetch("/api/dumps/upload", {
+        const res = await fetch(withBasePath("/api/dumps/upload"), {
           method: "POST",
           body: form,
         });
